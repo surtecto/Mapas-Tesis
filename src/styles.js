@@ -309,6 +309,11 @@ export function passFilter(feature, rules, mode = 'all') {
   return mode === 'any' ? rules.some(test) : rules.every(test);
 }
 
+export function propSymbolSize(pt, v) {
+  const mn = pt.sizeMin == null ? 2 : pt.sizeMin, mx = pt.sizeMax == null ? 18 : pt.sizeMax;
+  return mn + (mx - mn) * Math.sqrt(Math.max(0, v) / pt.sizeMaxValue);
+}
+
 export function makeVectorStyleFn(getLayerState, def, ctx) {
   const cache = new Map();
   let cacheVersion = -1;
@@ -340,14 +345,21 @@ export function makeVectorStyleFn(getLayerState, def, ctx) {
       if (labelCfg.uppercase) text = text.toLocaleUpperCase('es');
       if (lab.prefixRemove) text = text.replace(/^(Base|Isla)\s+/i, '');
     }
-    const key = `${geomType}|${catColor || ''}|${text}|${feature.get('clase') || ''}`;
+    const isPoint = geomType === 'Point' || geomType === 'MultiPoint';
+    // símbolos proporcionales: el área del símbolo crece con el valor (raíz cuadrada)
+    let propSize = null;
+    if (isPoint && st.point.sizeField && st.point.sizeMaxValue > 0) {
+      const v = Number(feature.get(st.point.sizeField));
+      if (Number.isFinite(v)) propSize = propSymbolSize(st.point, v);
+    }
+    const key = `${geomType}|${catColor || ''}|${text}|${feature.get('clase') || ''}|${propSize == null ? '' : propSize.toFixed(2)}`;
     if (cache.has(key)) return cache.get(key);
     const styles = [];
-    const isPoint = geomType === 'Point' || geomType === 'MultiPoint';
     const isLine = geomType === 'LineString' || geomType === 'MultiLineString';
     if (isPoint) {
       const p = { ...st.point };
       if (catColor) p.fill = catColor;
+      if (propSize != null) p.size = propSize;
       if (p.shape !== 'none' && p.size > 0) {
         styles.push(new Style({
           renderer(coords, state) {

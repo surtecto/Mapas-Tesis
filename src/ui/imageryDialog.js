@@ -103,13 +103,17 @@ export function openImageryDialog(app, { tab } = {}) {
       search.disabled = false; search.textContent = 'Buscar fechas en la vista';
       paintScenes();
     });
+    // Landsat MSS (1972–1992) no tiene banda azul: el color natural sale falseado
+    const renderFor = (sc) => (ui.sensor === 'landsat' && /MSS/i.test(sc.sensor || '') && /Natural Color/.test(ui.render) ? 'Color Infrared with DRA' : ui.render);
+    const mssNote = (sc) => (renderFor(sc) !== ui.render ? ' El sensor MSS no tiene banda azul: se usa infrarrojo color (la vegetación se ve roja).' : '');
     const addScene = (sc) => {
-      addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, neighbors: ui.scenes || [] }), { opacity: 1 });
+      addLayer(app, sceneLayerDef(ui.sensor, sc, renderFor(sc), { fill: ui.fill, neighbors: ui.scenes || [] }), { opacity: 1 });
+      if (mssNote(sc)) app.toast(mssNote(sc).trim());
       app.toast(`Imagen agregada: ${s.name} del ${sc.date.split('-').reverse().join('/')}${ui.fill ? ', con huecos completados por fechas cercanas' : ''}.`);
     };
     const compare = (sc) => {
       const prev = app.state.layers.filter((l) => l.def === 'svc' && l.svc.type === 'svc-image');
-      const ls = addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, neighbors: ui.scenes || [] }), { opacity: 1 });
+      const ls = addLayer(app, sceneLayerDef(ui.sensor, sc, renderFor(sc), { fill: ui.fill, neighbors: ui.scenes || [] }), { opacity: 1 });
       if (prev.length) {
         // la nueva va encima con cortina al 50 %: a la izquierda se ve la nueva, a la derecha la anterior
         const other = prev[prev.length - 1];

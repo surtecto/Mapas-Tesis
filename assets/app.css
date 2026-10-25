@@ -830,3 +830,13 @@ dialog.svc-dialog { width: min(1280px, calc(100vw - 24px)); height: min(860px, c
   .img-pane { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); overflow: auto; }
   .img-form { border-right: 0; border-bottom: 1px solid var(--rule); }
 }
+
+/* ---------- pestaña Análisis ---------- */
+.tabs { overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { font-variation-settings: 'wdth' 84; padding-left: 3px; padding-right: 3px; }
+.ramp-preview { display: flex; height: 12px; margin: 2px 0 6px; box-shadow: 0 0 0 1px rgba(0,0,0,.15); }
+.ramp-preview span { flex: 1; }
+.an-out { margin: 6px 0; }
+.an-out .stat-table td { padding: 3px 4px; }
+.paper.mode-add { cursor: crosshair; }

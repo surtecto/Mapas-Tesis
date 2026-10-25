@@ -129,8 +129,15 @@ export function defaultInterpCategories() {
     { id: 'posta', name: 'Posta, pulpería o capilla', geom: 'point', color: '#2f5d8c', size: 5.5, shape: 'star' },
     { id: 'tolderia', name: 'Toldería o paradero', geom: 'point', color: '#5a3d7a', size: 5.5, shape: 'triangle' },
     { id: 'hito', name: 'Hito, mojón u ombú', geom: 'point', color: '#1d1d1d', size: 4.5, shape: 'cross' },
+    ...EXTRA_INTERP_CATEGORIES,
   ];
 }
+// Recursos gráficos de interpretación agregados en la versión 3 (se suman también a los mapas anteriores)
+export const EXTRA_INTERP_CATEGORIES = [
+  { id: 'flujo', name: 'Flujo, movimiento o recorrido', geom: 'line', color: '#8c2f1b', width: 1.2, deco: 'arrows' },
+  { id: 'transicion', name: 'Zona de transición o borde incierto', geom: 'polygon', color: '#7a6a1f', width: 0.4, pattern: 'stipple' },
+  { id: 'percepcion', name: 'Lugar percibido o nombrado (no medido)', geom: 'polygon', color: '#5a3d7a', width: 0.5, pattern: 'diag' },
+];
 
 export function newVersion(name, over = {}) {
   return Object.assign({
@@ -172,6 +179,7 @@ export function emptyState() {
     scalebar: defaultScalebar(),
     caption: { figure: 'Figura 1', lead: 'Mapa de localización del área de estudio.' },
     credits: { author: '', year: '', institution: '', license: '' },
+    charts: [],
   };
 }
 
@@ -205,6 +213,7 @@ export function normalizeState(s) {
   out.scalebar = mergeDeep(defaultScalebar(), out.scalebar || {});
   out.insets = (out.insets || []).map((z) => newInset(z));
   out.texts = (out.texts || []).map((t) => newText(t));
+  out.charts = Array.isArray(out.charts) ? out.charts.filter((c) => c && c.id && Array.isArray(c.data)) : [];
   out.thesis = mergeDeep(defaultThesis(), out.thesis || {});
   const it = out.interp || {};
   if (!Array.isArray(it.versions) || !it.versions.length) it.versions = [newVersion('Versión 1')];
@@ -213,6 +222,7 @@ export function normalizeState(s) {
   if (it.ghost && !it.versions.some((v) => v.id === it.ghost)) it.ghost = null;
   if (!Array.isArray(it.sources)) it.sources = [];
   if (!Array.isArray(it.categories) || !it.categories.length) it.categories = defaultInterpCategories();
+  for (const c of EXTRA_INTERP_CATEGORIES) if (!it.categories.some((k) => k.id === c.id)) it.categories.push({ ...c });
   out.interp = it;
   return out;
 }

@@ -10,6 +10,20 @@ import { featureEditor } from './interpPanel.js';
 
 const ALIGN = [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']];
 
+function chartEditor(app, c) {
+  const ch = () => app.commit('overlay');
+  return el('div', {},
+    field('Título', text(c, 'title', { onChange: ch })),
+    inlineFields(field('Ancho', num(c, 'w', { min: 30, max: 400, step: 1, unit: 'mm', onChange: ch })), field('Alto', num(c, 'h', { min: 15, max: 200, step: 1, unit: 'mm', onChange: ch }))),
+    inlineFields(field('Rótulo inicio', text(c, 'labelA', { onChange: ch })), field('Rótulo fin', text(c, 'labelB', { onChange: ch }))),
+    inlineFields(field('Cota mínima', num(c, 'zmin', { step: 1, unit: 'm', onChange: ch })), field('Cota máxima', num(c, 'zmax', { step: 1, unit: 'm', onChange: ch }))),
+    el('p', { class: 'note' }, 'Vacías: se ajustan al perfil. La exageración vertical se calcula y se rotula sola; fijar cotas más amplias la reduce.'),
+    inlineFields(field('Línea', color(c, 'line', { onChange: ch })), field('Relleno', color(c, 'fill', { onChange: ch }))),
+    inlineFields(field('Tamaño de letra', num(c, 'size', { min: 4, max: 14, step: 0.5, unit: 'pt', onChange: ch })), field('Tipografía', select(c, 'font', FONTS, { onChange: ch }))),
+    check(c, 'bg', 'Fondo', { onChange: ch }),
+  );
+}
+
 export function renderInspector(app, root) {
   clear(root);
   const sel = app.selection;
@@ -36,6 +50,10 @@ export function renderInspector(app, root) {
     const t = st.texts.find((x) => x.id === sel.id);
     if (!t) return;
     root.append(title('Texto', () => { st.texts = st.texts.filter((x) => x !== t); app.select(null); app.commit('overlay'); app.renderLeft(); }), textEditor(app, t));
+  } else if (sel.kind === 'chart') {
+    const c = st.charts.find((x) => x.id === sel.id);
+    if (!c) return;
+    root.append(title('Perfil topográfico', () => { st.charts = st.charts.filter((x) => x !== c); app.select(null); app.commit('overlay'); }), chartEditor(app, c));
   } else if (sel.kind === 'legend') root.append(title('Leyenda'), legendEditor(app));
   else if (sel.kind === 'north') root.append(title('Flecha de norte'), northEditor(app));
   else if (sel.kind === 'scale') root.append(title('Escala gráfica'), scaleEditor(app));

@@ -3,7 +3,7 @@
 // la exportación ráster y la exportación SVG comparten exactamente el mismo código.
 import { getDistance } from 'ol/sphere.js';
 import { PT_MM, rgba, convexHull, segmentPolygonT, polygonCentroid, niceLength, roundScale, fmtInt, formatGridLabel, pointInPolygon } from './util.js';
-import { drawSymbol, dashArray, dashCap, fontString, getPattern, drawDecoratedLine } from './styles.js';
+import { drawSymbol, dashArray, dashCap, fontString, getPattern, drawDecoratedLine, propSymbolSize } from './styles.js';
 import { CERTAINTY } from './state.js';
 import { lonLatTo, toLonLatFrom } from './projections.js';
 import { getDef, defOf } from './catalog.js';
@@ -534,6 +534,91 @@ export function drawText(ctx, s, t, pos) {
   return corners.map(([x, y]) => [pos[0] + x * c - y * sn, pos[1] + x * sn + y * c]);
 }
 
+// Llamada: línea fina desde el texto hasta un punto del mapa, con un punto en el extremo
+function drawLeader(ctx, s, geo, t, pos) {
+  const tp = geo.main.toPage(lonLatTo(geo.main.projection, [t.leader.lon, t.leader.lat]));
+  if (!tp || !Number.isFinite(tp[0])) return;
+  ctx.save();
+  const col = t.leader.color || t.color || '#1d2b38';
+  ctx.strokeStyle = col; ctx.fillStyle = col;
+  ctx.lineWidth = (t.leader.width || 0.5) * PT_MM * s;
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(pos[0] * s, pos[1] * s); ctx.lineTo(tp[0] * s, tp[1] * s); ctx.stroke();
+  ctx.beginPath(); ctx.arc(tp[0] * s, tp[1] * s, 0.7 * s, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ---------- gráficos sobre la hoja: perfil topográfico ----------
+function niceStep(range, target) {
+  const raw = range / Math.max(1, target);
+  const p = 10 ** Math.floor(Math.log10(raw));
+  const m = raw / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+export function drawChart(ctx, s, c) {
+  if (!c || !c.data || c.data.length < 2) return null;
+  const { x, y, w, h } = c;
+  const font = c.font || 'Source Sans 3';
+  const fs = (c.size || 6) * PT_MM;
+  ctx.save();
+  if (c.bg !== false) { ctx.fillStyle = rgba(c.bgColor || '#ffffff', c.bgOpacity == null ? 0.92 : c.bgOpacity); ctx.fillRect(x * s, y * s, w * s, h * s); }
+  if (c.border !== false) { ctx.strokeStyle = '#3a4652'; ctx.lineWidth = 0.35 * PT_MM * s; ctx.strokeRect(x * s, y * s, w * s, h * s); }
+  const titleH = c.title ? fs * 1.9 : fs * 0.8;
+  const L = x + fs * 4.6, R = x + w - fs * 1.2, T = y + titleH + fs * 0.4, B = y + h - fs * 2.6;
+  const ds = c.data.map((r) => r[0]), zs = c.data.map((r) => r[1]);
+  const total = ds[ds.length - 1] || 1;
+  let zmin = Math.min(...zs), zmax = Math.max(...zs);
+  if (c.zmin != null && c.zmin !== '') zmin = Number(c.zmin);
+  if (c.zmax != null && c.zmax !== '') zmax = Number(c.zmax);
+  if (zmax - zmin < 2) { const mid = (zmax + zmin) / 2; zmin = mid - 1; zmax = mid + 1; }
+  const padZ = (zmax - zmin) * 0.08;
+  zmin -= padZ; zmax += padZ;
+  const X = (d) => L + ((R - L) * d) / total, Y = (z) => B - ((B - T) * (z - zmin)) / (zmax - zmin);
+  ctx.font = `${c.boldTitle === false ? '' : '600 '}${fs * s}px "${font}"`;
+  ctx.fillStyle = c.color || '#1d2b38';
+  ctx.textBaseline = 'top';
+  if (c.title) ctx.fillText(c.title, (x + fs * 0.9) * s, (y + fs * 0.6) * s);
+  // grilla y ejes
+  ctx.font = `${fs * 0.9 * s}px "${font}"`;
+  ctx.strokeStyle = 'rgba(58,70,82,0.25)'; ctx.lineWidth = 0.25 * PT_MM * s;
+  const zStep = niceStep(zmax - zmin, 4);
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#4a5560';
+  for (let z = Math.ceil(zmin / zStep) * zStep; z <= zmax; z += zStep) {
+    ctx.beginPath(); ctx.moveTo(L * s, Y(z) * s); ctx.lineTo(R * s, Y(z) * s); ctx.stroke();
+    ctx.fillText(`${Math.round(z).toLocaleString('es-AR')}`, (L - fs * 0.5) * s, Y(z) * s);
+  }
+  const dStep = niceStep(total, 5);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  for (let d = 0; d <= total + 1e-9; d += dStep) {
+    ctx.beginPath(); ctx.moveTo(X(d) * s, B * s); ctx.lineTo(X(d) * s, (B + fs * 0.35) * s); ctx.stroke();
+    ctx.fillText(`${(Math.round(d * 10) / 10).toLocaleString('es-AR')}`, X(d) * s, (B + fs * 0.5) * s);
+  }
+  ctx.textAlign = 'right';
+  ctx.fillText('km', R * s, (B + fs * 1.45) * s);
+  ctx.save();
+  ctx.translate((x + fs * 1.0) * s, ((T + B) / 2) * s); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('m s. n. m.', 0, 0);
+  ctx.restore();
+  // relleno y línea del perfil
+  ctx.beginPath();
+  ctx.moveTo(X(ds[0]) * s, B * s);
+  c.data.forEach((r) => ctx.lineTo(X(r[0]) * s, Y(r[1]) * s));
+  ctx.lineTo(X(total) * s, B * s); ctx.closePath();
+  ctx.fillStyle = rgba(c.fill || '#c9b48f', c.fillOpacity == null ? 0.55 : c.fillOpacity); ctx.fill();
+  ctx.beginPath();
+  c.data.forEach((r, i) => { if (i === 0) ctx.moveTo(X(r[0]) * s, Y(r[1]) * s); else ctx.lineTo(X(r[0]) * s, Y(r[1]) * s); });
+  ctx.strokeStyle = c.line || '#5b3a1e'; ctx.lineWidth = (c.lineWidth || 0.8) * PT_MM * s; ctx.lineJoin = 'round'; ctx.stroke();
+  // marcas A y B y exageración vertical (calculada, no elegida)
+  ctx.fillStyle = c.color || '#1d2b38'; ctx.font = `600 ${fs * s}px "${font}"`; ctx.textBaseline = 'bottom';
+  ctx.textAlign = 'left'; ctx.fillText(c.labelA || 'A', (L + fs * 0.3) * s, (T + fs * 1.2) * s);
+  ctx.textAlign = 'right'; ctx.fillText(c.labelB || 'B', (R - fs * 0.3) * s, (T + fs * 1.2) * s);
+  const ve = ((B - T) / (zmax - zmin)) / ((R - L) / (total * 1000));
+  ctx.font = `italic ${fs * 0.85 * s}px "${font}"`; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillStyle = '#4a5560';
+  ctx.fillText(`Exageración vertical ×${ve >= 10 ? Math.round(ve).toLocaleString('es-AR') : ve.toFixed(1).replace('.', ',')}`, (L) * s, (B + fs * 1.45) * s);
+  ctx.restore();
+  return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+}
+
 export function textPosition(geo, t) {
   if (t.anchor === 'geo' && Number.isFinite(t.lon) && Number.isFinite(t.lat)) {
     return geo.main.toPage(lonLatTo(geo.main.projection, [t.lon, t.lat]));
@@ -583,6 +668,15 @@ export function legendItems(state) {
     const cz = st.categorize || {};
     const cat = cz.field && cz.mode === 'ranges' ? (cz.ranges || []).map((r) => [r.label || `${r.min}–${r.max}`, r.color])
       : cz.field && cz.values ? Object.entries(cz.values) : [];
+    if (def.geom === 'point' && st.point && st.point.sizeField && st.point.sizeMaxValue > 0) {
+      // símbolos proporcionales: tres tamaños de referencia
+      const mx = st.point.sizeMaxValue;
+      const nice = (x) => { const p = 10 ** Math.floor(Math.log10(x)); return Math.round(x / p) * p; };
+      const vals = [...new Set([nice(mx), nice(mx / 4), nice(mx / 16)])].filter((v) => v > 0);
+      items.push({ key: `layer:${ls.uid}:titulo`, label: ls.legend.label || ls.name, sym: { type: 'point', cfg: { ...st.point, shape: 'none' } } });
+      for (const v of vals) items.push({ key: `layer:${ls.uid}:v${v}`, label: `${v.toLocaleString('es-AR')}${st.point.sizeUnit ? ` ${st.point.sizeUnit}` : ''}`, sym: { type: 'point', trueSize: true, cfg: { ...st.point, size: propSymbolSize(st.point, v) } } });
+      continue;
+    }
     if (cat.length && ls.legend.expand !== false) {
       for (const [val, col] of cat) {
         items.push({ key: `layer:${ls.uid}:${val}`, label: val, sym: symFromStyle(def.geom, st, col) });
@@ -693,11 +787,16 @@ export function drawLegend(ctx, s, state) {
   ctx.font = fontString({ font: L.font, sizePx: sizeMM * s, bold: L.bold });
   const cols = Math.max(1, Math.min(4, L.columns || 1));
   const perCol = Math.ceil(items.length / cols);
+  // los símbolos proporcionales se dibujan a su tamaño real: la fila y la columna de símbolos crecen con ellos
+  const itemH = (it) => (it.sym && it.sym.trueSize ? Math.max(rowH, it.sym.cfg.size * PT_MM + 1.2) : rowH);
+  const symW = Math.max(symMM * 1.5, ...items.filter((it) => it.sym && it.sym.trueSize).map((it) => it.sym.cfg.size * PT_MM + 1.2));
   const colW = [];
+  const colH = [];
   for (let c = 0; c < cols; c++) {
     const slice = items.slice(c * perCol, (c + 1) * perCol);
     const tw = Math.max(0, ...slice.map((it) => ctx.measureText(it.label).width / s));
-    colW.push(symMM * 1.5 + gap + tw);
+    colW.push(symW + gap + tw);
+    colH.push(slice.reduce((a, it) => a + itemH(it), 0));
   }
   let titleH = 0, titleW = 0;
   if (L.title) {
@@ -707,7 +806,7 @@ export function drawLegend(ctx, s, state) {
   }
   const colGap = 4;
   const w = Math.max(titleW, colW.reduce((a, b) => a + b, 0) + colGap * (cols - 1)) + pad * 2;
-  const h = titleH + perCol * rowH + pad * 2 - (items.length ? 0 : rowH);
+  const h = titleH + Math.max(0, ...colH) + pad * 2;
   const x0 = L.x, y0 = L.y;
   ctx.save();
   ctx.beginPath();
@@ -725,12 +824,15 @@ export function drawLegend(ctx, s, state) {
   let cx = x0 + pad;
   for (let c = 0; c < cols; c++) {
     const slice = items.slice(c * perCol, (c + 1) * perCol);
-    slice.forEach((it, i) => {
-      const cy = y0 + pad + titleH + rowH * (i + 0.5);
-      drawLegendSymbol(ctx, s, it.sym, cx + symMM * 0.75, cy, symMM);
+    let yy = y0 + pad + titleH;
+    slice.forEach((it) => {
+      const ih = itemH(it);
+      const cy = yy + ih / 2;
+      yy += ih;
+      drawLegendSymbol(ctx, s, it.sym, cx + symW / 2, cy, it.sym && it.sym.trueSize ? it.sym.cfg.size * PT_MM * 2 : symMM);
       ctx.font = fontString({ font: L.font, sizePx: sizeMM * s, bold: L.bold });
       ctx.fillStyle = L.color;
-      ctx.fillText(it.label, (cx + symMM * 1.5 + gap) * s, cy * s);
+      ctx.fillText(it.label, (cx + symW + gap) * s, cy * s);
     });
     cx += colW[c] + colGap;
   }
@@ -1017,11 +1119,13 @@ export function drawOverlay(ctx, s, geo, state, opts = {}) {
     for (const t of state.texts) {
       const pos = textPosition(geo, t);
       if (!pos || !Number.isFinite(pos[0])) continue;
+      if (t.leader && Number.isFinite(t.leader.lon) && Number.isFinite(t.leader.lat)) drawLeader(ctx, s, geo, t, pos);
       const poly = drawText(ctx, s, t, pos);
       hits && hits.push({ kind: 'text', id: t.id, poly, pos });
     }
   });
   if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+  if (state.charts && state.charts.length) group('graficos', 'Gráficos (perfiles)', () => { for (const c of state.charts) { const poly = drawChart(ctx, s, c); if (poly && hits) hits.push({ kind: 'chart', id: c.id, poly }); } });
   if (state.legend.show) group('leyenda', 'Leyenda', () => { const poly = drawLegend(ctx, s, state); if (poly && hits) hits.push({ kind: 'legend', id: 'legend', poly }); });
   if (state.north.show) group('norte', 'Norte', () => { const poly = drawNorth(ctx, s, state.north, geo); if (hits) hits.push({ kind: 'north', id: 'north', poly }); });
   if (state.scalebar.show) group('escala', 'Escala gráfica', () => { const poly = drawScaleBar(ctx, s, state.scalebar, geo); if (poly && hits) hits.push({ kind: 'scale', id: 'scale', poly }); });

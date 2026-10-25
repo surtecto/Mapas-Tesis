@@ -7,7 +7,7 @@ import { transformExtent } from 'ol/proj.js';
 import { MapCtx } from './mapctx.js';
 import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom } from './projections.js';
 import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, insetOutline, textPosition } from './overlay.js';
-import { History, normalizeState, loadLocal, serializeState } from './state.js';
+import { History, normalizeState, loadLocal, serializeState, newText } from './state.js';
 import { TEMPLATES } from './templates.js';
 import {
   getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject, snapshotMap, restorePrev,
@@ -18,6 +18,7 @@ import { renderHome, renderWizard, metaFields } from './ui/home.js';
 import { confirmDialog, formDialog, promptDialog } from './ui/dialogs.js';
 import { renderThesisPanel } from './ui/thesisPanel.js';
 import { renderInterpPanel } from './ui/interpPanel.js';
+import { renderAnalysisPanel } from './ui/analysisPanel.js';
 import { setupSearch } from './ui/search.js';
 import { simulationFilter } from './media.js';
 import { getImage, exportImages, importImages } from './imagestore.js';
@@ -797,6 +798,10 @@ class App {
     }
   }
 
+  stopAnalysisDraw() {
+    if (this.analysisDraw) { try { this.mainCtx.map.removeInteraction(this.analysisDraw); } catch (e) { /* noop */ } this.analysisDraw = null; }
+  }
+
   styleChanged(ls) {
     ls._styleVersion = (ls._styleVersion || 0) + 1;
     this.commit('layers');
@@ -813,7 +818,9 @@ class App {
     this.mode = mode;
     this.modeDraft = draft || null;
     this.$.paper.classList.toggle('mode-add', mode === 'add-site');
+    this.$.paper.classList.toggle('mode-add', mode === 'add-site' || mode === 'add-callout');
     if (mode === 'add-site') this.toast('Tocá el mapa o un zoom para ubicar el sitio. Esc cancela.');
+    if (mode === 'add-callout') this.toast('Tocá el punto del mapa que querés señalar. Esc cancela.');
   }
 
   flyTo(center, mpm, rotation) {
@@ -889,6 +896,7 @@ class App {
     else if (this.ui.tab === 'capas') renderLayersPanel(this, root);
     else if (this.ui.tab === 'sitios') renderSitesPanel(this, root);
     else if (this.ui.tab === 'interp') renderInterpPanel(this, root);
+    else if (this.ui.tab === 'analisis') renderAnalysisPanel(this, root);
     else renderFigurePanel(this, root);
     root.scrollTop = scroll;
   }
@@ -1045,6 +1053,22 @@ class App {
       if (e.button !== 0) return;
       if (this.mode === 'draw' || this.mode === 'modify') return; // OpenLayers dibuja
       const pt = this.pointerMM(e);
+      if (this.mode === 'add-callout') {
+        const { scope } = this.scopeAt(pt);
+        const c = scope.fromPage(pt);
+        if (c) {
+          const ll = toLonLatFrom(scope.projection, c);
+          const f = frameRect(this.state);
+          const tx = Math.min(f.x + f.w - 12, pt[0] + 14), ty = Math.max(f.y + 6, pt[1] - 12);
+          const t = newText({ text: 'Nota', x: tx, y: ty, size: 7.5, align: 'left', color: '#1d2b38', bg: { show: true, color: '#ffffff', opacity: 0.9, pad: 1.2, radius: 0.6 }, leader: { lon: ll[0], lat: ll[1], width: 0.5 } });
+          this.state.texts.push(t);
+          this.setMode(null);
+          this.commit('overlay');
+          this.select({ kind: 'text', id: t.id });
+        }
+        e.stopPropagation(); e.preventDefault();
+        return;
+      }
       if (this.mode === 'add-site') {
         const { scope } = this.scopeAt(pt);
         const c = scope.fromPage(pt);
@@ -1103,7 +1127,8 @@ class App {
         if (a > 180) a -= 360;
         if (!e.shiftKey) { const snap = Math.round(a / 15) * 15; if (Math.abs(snap - a) < 3) a = snap; }
         t.rotation = Math.round(a * 10) / 10;
-      } else if (drag.kind === 'legend') nudge(st.legend);
+      } else if (drag.kind === 'chart') { const c = st.charts.find((x) => x.id === drag.id); if (c) nudge(c); }
+      else if (drag.kind === 'legend') nudge(st.legend);
       else if (drag.kind === 'north') nudge(st.north);
       else if (drag.kind === 'scale') nudge(st.scalebar);
       else if (drag.kind === 'inset') {
@@ -1153,6 +1178,7 @@ class App {
         const r1 = (o, keys) => { if (o) keys.forEach((k) => { if (Number.isFinite(o[k])) o[k] = Math.round(o[k] * 10) / 10; }); };
         if (d.kind === 'inset' || d.kind === 'inset-resize') r1(this.state.insets.find((x) => x.id === d.id), ['x', 'y', 'w', 'h']);
         if (d.kind === 'legend') r1(this.state.legend, ['x', 'y']);
+        if (d.kind === 'chart') r1(this.state.charts.find((x) => x.id === d.id), ['x', 'y']);
         if (d.kind === 'north') r1(this.state.north, ['x', 'y']);
         if (d.kind === 'scale') r1(this.state.scalebar, ['x', 'y']);
         if (d.kind === 'text') r1(this.state.texts.find((x) => x.id === d.id), ['x', 'y']);
@@ -1206,6 +1232,7 @@ class App {
       if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'y') { e.preventDefault(); this.redo(); return; }
       if (typing) return;
       if (e.key === 'Escape') {
+        if (this.analysisDraw) { this.stopAnalysisDraw(); this.toast('Medición cancelada.'); return; }
         if (this.mode === 'draw' || this.mode === 'modify') { if (this._draw && this._draw.abortDrawing) this._draw.abortDrawing(); this.stopDraw(); return; }
         if (this.mode) { this.setMode(null); this.renderLeft(); } else this.select(null);
         return;
@@ -1219,6 +1246,7 @@ class App {
         if (sel.kind === 'text') st.texts = st.texts.filter((t) => t.id !== sel.id);
         else if (sel.kind === 'inset') st.insets = st.insets.filter((t) => t.id !== sel.id);
         else if (sel.kind === 'site') st.sites = st.sites.filter((t) => t.id !== sel.id);
+        else if (sel.kind === 'chart') st.charts = st.charts.filter((t) => t.id !== sel.id);
         else if (sel.kind === 'legend') st.legend.show = false;
         else if (sel.kind === 'north') st.north.show = false;
         else if (sel.kind === 'scale') st.scalebar.show = false;
@@ -1234,6 +1262,7 @@ class App {
         const [dx, dy] = dirs[e.key];
         let o = null;
         if (sel.kind === 'text') { const t = st.texts.find((x) => x.id === sel.id); if (t && t.anchor === 'page') o = t; else if (t) { const p = this.lonLatToPage([t.lon, t.lat]); const ll = p && this.pageToLonLat([p[0] + dx, p[1] + dy]); if (ll) { t.lon = ll[0]; t.lat = ll[1]; } } }
+        else if (sel.kind === 'chart') o = st.charts.find((x) => x.id === sel.id);
         else if (sel.kind === 'legend') o = st.legend;
         else if (sel.kind === 'north') o = st.north;
         else if (sel.kind === 'scale') o = st.scalebar;
