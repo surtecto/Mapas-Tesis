@@ -36,7 +36,7 @@ function csv(rows) { return '﻿' + rows.map((r) => r.map((v) => `"${String(v).r
 export function openImageryDialog(app, { tab } = {}) {
   const d = dialogEl();
   clear(d);
-  const ui = app.ui.img || (app.ui.img = { tab: 'fecha', sensor: 's2', render: 'Natural Color with DRA', from: '', to: '', cloud: 20, season: '', lcYear: 2025, lcYear2: 2017, lcPal: 'tesis', k: 6, kSensor: 's2', scenes: null });
+  const ui = app.ui.img || (app.ui.img = { tab: 'fecha', sensor: 's2', render: 'Natural Color with DRA', from: '', to: '', cloud: 20, season: '', fill: true, lcYear: 2025, lcYear2: 2017, lcPal: 'tesis', k: 6, kSensor: 's2', scenes: null });
   if (tab) ui.tab = tab;
   const body = el('div', { class: 'img-body' });
   const tabs = el('div', { class: 'seg img-tabs', role: 'tablist' });
@@ -104,12 +104,12 @@ export function openImageryDialog(app, { tab } = {}) {
       paintScenes();
     });
     const addScene = (sc) => {
-      addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render), { opacity: 1 });
-      app.toast(`Imagen agregada: ${s.name} del ${sc.date.split('-').reverse().join('/')}.`);
+      addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, maxCloud: Math.max(0.2, ui.cloud / 100) }), { opacity: 1 });
+      app.toast(`Imagen agregada: ${s.name} del ${sc.date.split('-').reverse().join('/')}${ui.fill ? ', con huecos completados por fechas cercanas' : ''}.`);
     };
     const compare = (sc) => {
       const prev = app.state.layers.filter((l) => l.def === 'svc' && l.svc.type === 'svc-image');
-      const ls = addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render), { opacity: 1 });
+      const ls = addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, maxCloud: Math.max(0.2, ui.cloud / 100) }), { opacity: 1 });
       if (prev.length) {
         // la nueva va encima con cortina al 50 %: a la izquierda se ve la nueva, a la derecha la anterior
         const other = prev[prev.length - 1];
@@ -130,6 +130,7 @@ export function openImageryDialog(app, { tab } = {}) {
         el('div', { class: 'wf-row' }, fld('Desde', fromIn), fld('Hasta', toIn)),
         fld('Estación', selectOf(ui, 'season', SEASONS)),
         fld('Nubosidad máxima', el('div', { class: 'range-row' }, cloud, cloudOut)),
+        (() => { const c = el('input', { type: 'checkbox', checked: ui.fill }); c.addEventListener('change', () => { ui.fill = c.checked; }); return el('label', { class: 'check' }, c, el('span', {}, 'Completar los huecos con fechas cercanas (±20 días)')); })(),
         el('div', { class: 'btn-row' }, search,
           el('button', { type: 'button', class: 'btn ghost', onclick: () => { addLayer(app, sceneLayerDef(ui.sensor, null, ui.render)); app.toast(`Mosaico más despejado de ${s.name} agregado.`); } }, 'Agregar el mosaico más despejado'))),
       el('div', { class: 'img-results' }, list));
@@ -324,6 +325,8 @@ function addDateLabels(app, older, newer, top) {
   const leftIsNewer = top === newer && (top.params.swipeSide || 'left') === 'left';
   const left = leftIsNewer ? newer : older, right = leftIsNewer ? older : newer;
   st.texts = st.texts.filter((t) => !t._swipeLabel && !(t.tag === 'swipe'));
-  st.texts.push(newText({ text: fmt(left), x: f.x + f.w * 0.25, y: f.y + 6, size: 9, bold: true, color: '#ffffff', halo: '#1d1d1d', haloWidth: 1.2, tag: 'swipe' }));
-  st.texts.push(newText({ text: fmt(right), x: f.x + f.w * 0.75, y: f.y + 6, size: 9, bold: true, color: '#ffffff', halo: '#1d1d1d', haloWidth: 1.2, tag: 'swipe' }));
+  const cx = f.x + (f.w * Number(top.params.swipe || 50)) / 100;
+  const box = { show: true, color: '#1d1d1d', opacity: 0.72, pad: 1.2, radius: 0.6 };
+  st.texts.push(newText({ text: fmt(left), x: cx - 2.5, y: f.y + 5, size: 8.5, bold: true, color: '#ffffff', align: 'right', bg: box, tag: 'swipe' }));
+  st.texts.push(newText({ text: fmt(right), x: cx + 2.5, y: f.y + 5, size: 8.5, bold: true, color: '#ffffff', align: 'left', bg: box, tag: 'swipe' }));
 }

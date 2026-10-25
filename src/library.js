@@ -129,6 +129,22 @@ export async function saveMap(id, state, { thumb, name } = {}) {
   if (p) { p.updated = m.updated; p.activeMapId = id; await dbPut('proyectos', p); }
   return m;
 }
+// Copia de resguardo: el estado del mapa tal como estaba al abrirlo (se puede volver a él)
+export async function snapshotMap(id) {
+  const m = await dbGet('mapas', id);
+  if (!m) return;
+  m.prev = { state: m.state, updated: m.updated, name: m.name, taken: now() };
+  await dbPut('mapas', m);
+}
+export async function restorePrev(id) {
+  const m = await dbGet('mapas', id);
+  if (!m || !m.prev) return null;
+  const cur = { state: m.state, updated: m.updated, name: m.name, taken: now() };
+  m.state = m.prev.state; m.name = m.prev.name || m.name; m.updated = now();
+  m.prev = cur; // se puede ir y volver
+  await dbPut('mapas', m);
+  return m;
+}
 export async function renameMap(id, name) {
   const m = await dbGet('mapas', id);
   if (!m) return;

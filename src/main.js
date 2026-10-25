@@ -10,7 +10,7 @@ import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, inset
 import { History, normalizeState, loadLocal, serializeState } from './state.js';
 import { TEMPLATES } from './templates.js';
 import {
-  getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject,
+  getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject, snapshotMap, restorePrev,
   exportProject, importProject, migrateLegacy, defaultMeta,
 } from './library.js';
 import { buildFirstMap } from './starter.js';
@@ -108,7 +108,7 @@ class App {
     document.getElementById('app').hidden = false;
   }
 
-  async openProject(projectId, mapId) {
+  async openProject(projectId, mapId, { snapshot = true } = {}) {
     let p;
     try { p = await getProject(projectId); } catch (e) { p = null; }
     if (!p) { this.toast('Ese proyecto no está en esta computadora.', 'warn'); this.setHash('#/'); renderHome(this); return; }
@@ -134,6 +134,7 @@ class App {
     if (state._dropped) { this.toast(`Se omitieron capas que no se pudieron leer: ${state._dropped.join(', ')}.`, 'warn'); delete state._dropped; }
     state.title = m.name || state.title;
     this.fillFromMeta(state, p.meta);
+    if (snapshot) { try { await snapshotMap(m.id); } catch (e) { /* sin resguardo */ } }
     this.current = { projectId, mapId: m.id, project: p, maps: maps.map((x) => ({ id: x.id, name: x.name, updated: x.updated, thumb: x.thumb })) };
     this.showEditor();
     this.state = state;
@@ -273,6 +274,17 @@ class App {
         el('button', { type: 'button', role: 'menuitem', onclick: () => { menu.hidden = true; this.newMapDialog(); } }, 'Nuevo mapa en este proyecto…'),
         el('button', { type: 'button', role: 'menuitem', onclick: async () => { menu.hidden = true; await this.saveCurrent(); const nm = await duplicateMap(cur.mapId, `${this.state.title} (copia)`); await this.reloadMaps(); location.hash = `#/p/${cur.projectId}/${nm.id}`; } }, 'Duplicar este mapa'),
         el('button', { type: 'button', role: 'menuitem', onclick: () => { menu.hidden = true; this.$.title.focus(); this.$.title.select(); } }, 'Renombrar este mapa'),
+        el('button', { type: 'button', role: 'menuitem', onclick: async () => {
+          menu.hidden = true;
+          const ok = await confirmDialog({ title: 'Volver a como estaba al abrirlo', text: 'El mapa vuelve al estado que tenía cuando lo abriste. Lo que hiciste desde entonces queda como resguardo: repetir esta acción lo recupera.', ok: 'Volver' });
+          if (!ok) return;
+          const mid = cur.mapId;
+          this.current = null;
+          const m = await restorePrev(mid);
+          if (!m) { this.toast('No hay una copia de resguardo de este mapa.'); }
+          await this.openProject(cur.projectId, mid, { snapshot: false });
+          if (m) this.toast('Listo: el mapa volvió a como estaba al abrirlo.');
+        } }, 'Volver a como estaba al abrirlo…'),
         el('button', { type: 'button', role: 'menuitem', class: 'danger', disabled: cur.maps.length < 2, onclick: () => { menu.hidden = true; this.deleteCurrentMap(); } }, cur.maps.length < 2 ? 'Eliminar este mapa (es el único)' : 'Eliminar este mapa…'));
     };
     btn.addEventListener('click', (e) => { e.stopPropagation(); fill(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); });

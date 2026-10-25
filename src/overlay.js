@@ -994,6 +994,20 @@ export function drawOverlay(ctx, s, geo, state, opts = {}) {
   const fps = {};
   // en SVG cada bloque queda en su propio grupo (capa en Illustrator / Inkscape)
   const group = (id, label, fn) => { if (ctx.beginGroup) ctx.beginGroup(id, label); fn(); if (ctx.endGroup) ctx.endGroup(); };
+  // línea de la cortina de comparación (una por capa con cortina visible)
+  const swipes = state.layers.filter((l) => l.visible && l.params && l.params.swipe != null && l.params.swipe !== '' && Number(l.params.swipe) > 0 && Number(l.params.swipe) < 100);
+  if (swipes.length) group('cortina', 'Cortina de comparación', () => {
+    for (const l of swipes) {
+      const x = (f.x + (f.w * Number(l.params.swipe)) / 100) * s;
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = 'rgba(20,20,20,0.55)'; ctx.lineWidth = 1.4 * PT_MM * s; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.moveTo(x, f.y * s); ctx.lineTo(x, (f.y + f.h) * s); ctx.stroke();
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.7 * PT_MM * s;
+      ctx.beginPath(); ctx.moveTo(x, f.y * s); ctx.lineTo(x, (f.y + f.h) * s); ctx.stroke();
+      ctx.restore();
+    }
+  });
   group('grilla', 'Grilla de coordenadas', () => drawGraticules(ctx, s, geo, state));
   group('area-ampliada', 'Áreas ampliadas', () => drawFootprints(ctx, s, geo, state, hits, fps));
   group('sitios', 'Sitios de estudio', () => drawSites(ctx, s, geo, state));

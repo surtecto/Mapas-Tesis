@@ -94,15 +94,32 @@ export async function searchScenes(sensorId, bboxLL, { from, to, maxCloud = 0.2,
 }
 
 // ---------- definiciones de capa ----------
-export function sceneLayerDef(sensorId, scene, render) {
+// fill: completa los huecos de la escena con las fechas más cercanas (± días) para cubrir toda la vista
+export function sceneLayerDef(sensorId, scene, render, { fill = false, days = 20, maxCloud = 0.2 } = {}) {
   const s = SENSORS[sensorId];
   const rName = (s.renders.find((r) => r[0] === render) || [render, render])[1];
   const when = scene ? scene.date.split('-').reverse().join('/') : 'mosaico más reciente';
+  let mosaic, note;
+  if (!scene) {
+    mosaic = { mosaicMethod: 'esriMosaicAttribute', sortField: s.cloudField, ascending: true, where: `${s.cloudField} <= 0.1${s.where ? ` AND ${s.where}` : ''}` };
+    note = 'Mosaico de las escenas más despejadas';
+  } else if (fill) {
+    const d0 = new Date(`${scene.date}T00:00:00Z`);
+    const a = new Date(d0.getTime() - days * 864e5).toISOString().slice(0, 10), b = new Date(d0.getTime() + days * 864e5).toISOString().slice(0, 10);
+    mosaic = {
+      mosaicMethod: 'esriMosaicAttribute', sortField: s.dateField, sortValue: scene.date.replace(/-/g, '/'), ascending: true,
+      where: [`${s.cloudField} <= ${maxCloud}`, s.where, `${s.dateField} >= timestamp '${a} 00:00:00'`, `${s.dateField} <= timestamp '${b} 23:59:59'`].filter(Boolean).join(' AND '),
+    };
+    note = `Escena del ${scene.date}, con los huecos completados por las escenas más cercanas entre ${a} y ${b}`;
+  } else {
+    mosaic = { mosaicMethod: 'esriMosaicLockRaster', lockRasterIds: scene.ids };
+    note = `Fecha de adquisición: ${scene.date}`;
+  }
   return {
     id: 'svc', kind: 'raster', type: 'svc-image', name: `${s.name} ${when}: ${rName.split(':')[0].toLowerCase()}`, url: s.url, sensor: sensorId,
-    render, mosaic: scene ? { mosaicMethod: 'esriMosaicLockRaster', lockRasterIds: scene.ids } : { mosaicMethod: 'esriMosaicAttribute', sortField: s.cloudField, ascending: true, where: `${s.cloudField} <= 0.1${s.where ? ` AND ${s.where}` : ''}` },
+    render, mosaic, fill: !!(scene && fill),
     date: scene ? scene.date : '', cloud: scene ? scene.cloud : null, provider: { id: sensorId, short: s.name, name: s.name },
-    attribution: s.attribution, cite: `${s.cite}. ${scene ? `Fecha de adquisición: ${scene.date}` : 'Mosaico de las escenas más despejadas'}; representación «${rName}». Consultado el ${today()}`,
+    attribution: s.attribution, cite: `${s.cite}. ${note}; representación «${rName}». Consultado el ${today()}`,
   };
 }
 
