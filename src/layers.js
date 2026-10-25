@@ -165,7 +165,7 @@ function getRasterSource(ls, def, mctx) {
     // imágenes por fecha (bloqueo de escenas) y coberturas con paleta propia (función Colormap del servidor)
     const reqProj = /^(EPSG:3031|EPSG:6932)$/.test(mapProj) ? mapProj : 'EPSG:3857';
     const params = def.type === 'svc-image'
-      ? { renderingRule: JSON.stringify({ rasterFunction: def.render }), mosaicRule: JSON.stringify(def.mosaic), format: 'jpgpng', interpolation: 'RSP_BilinearInterpolation' }
+      ? { renderingRule: JSON.stringify({ rasterFunction: def.render }), ...(def.mosaic ? { mosaicRule: JSON.stringify(def.mosaic) } : {}), format: 'jpgpng', interpolation: 'RSP_BilinearInterpolation' }
       : { renderingRule: JSON.stringify(landcoverRenderingRule(def.classes)), time: yearTime(def.year), format: 'png32', interpolation: 'RSP_NearestNeighbor' };
     const key = cacheKey(ls, `${def.type}|${reqProj}|${JSON.stringify(params)}`);
     if (!rasterSources.has(key)) {

@@ -95,30 +95,29 @@ export async function searchScenes(sensorId, bboxLL, { from, to, maxCloud = 0.2,
 }
 
 // ---------- definiciones de capa ----------
-// fill: completa los huecos de la escena con las fechas más cercanas (± días) para cubrir toda la vista
-export function sceneLayerDef(sensorId, scene, render, { fill = false, days = 20, maxCloud = 0.2 } = {}) {
+// fill: completa los huecos de la escena con las fechas más cercanas (± días) para cubrir toda la vista.
+// Se usa «bloqueo de escenas» (lockRaster) porque los mosaicos por atributo quedan vacíos a escalas chicas.
+export function sceneLayerDef(sensorId, scene, render, { fill = false, days = 20, neighbors = [] } = {}) {
   const s = SENSORS[sensorId];
   const rName = (s.renders.find((r) => r[0] === render) || [render, render])[1];
   const when = scene ? scene.date.split('-').reverse().join('/') : 'mosaico más reciente';
-  let mosaic, note;
-  if (!scene) {
-    mosaic = { mosaicMethod: 'esriMosaicAttribute', sortField: s.cloudField, ascending: true, where: `${s.cloudField} <= 0.1${s.where ? ` AND ${s.where}` : ''}` };
-    note = 'Mosaico de las escenas más despejadas';
-  } else if (fill) {
-    const d0 = new Date(`${scene.date}T00:00:00Z`);
-    const a = new Date(d0.getTime() - days * 864e5).toISOString().slice(0, 10), b = new Date(d0.getTime() + days * 864e5).toISOString().slice(0, 10);
-    mosaic = {
-      mosaicMethod: 'esriMosaicAttribute', sortField: s.dateField, sortValue: scene.date.replace(/-/g, '/'), ascending: true,
-      where: [`${s.cloudField} <= ${maxCloud}`, s.where, `${s.dateField} >= timestamp '${a} 00:00:00'`, `${s.dateField} <= timestamp '${b} 23:59:59'`].filter(Boolean).join(' AND '),
-    };
-    note = `Escena del ${scene.date}, con los huecos completados por las escenas más cercanas entre ${a} y ${b}`;
-  } else {
-    mosaic = { mosaicMethod: 'esriMosaicLockRaster', lockRasterIds: scene.ids };
-    note = `Fecha de adquisición: ${scene.date}`;
+  let mosaic = null, note = 'Mosaico predeterminado del servicio (escenas recientes y despejadas)';
+  if (scene) {
+    let ids = [...scene.ids];
+    let range = '';
+    if (fill && neighbors.length) {
+      const t0 = Date.parse(`${scene.date}T00:00:00Z`);
+      const near = neighbors.filter((n) => n.date !== scene.date && Math.abs(Date.parse(`${n.date}T00:00:00Z`) - t0) <= days * 864e5)
+        .sort((a, b) => Math.abs(Date.parse(`${a.date}T00:00:00Z`) - t0) - Math.abs(Date.parse(`${b.date}T00:00:00Z`) - t0));
+      for (const n of near) { if (ids.length >= 80) break; ids = ids.concat(n.ids); }
+      if (near.length) { const ds = near.map((n) => n.date).concat(scene.date).sort(); range = `${ds[0]} y ${ds[ds.length - 1]}`; }
+    }
+    mosaic = { mosaicMethod: 'esriMosaicLockRaster', lockRasterIds: ids.slice(0, 80) };
+    note = range ? `Escena del ${scene.date}, con los huecos completados por escenas cercanas entre ${range}` : `Fecha de adquisición: ${scene.date}`;
   }
   return {
     id: 'svc', kind: 'raster', type: 'svc-image', name: `${s.name} ${when}: ${rName.split(':')[0].toLowerCase()}`, url: s.url, sensor: sensorId,
-    render, mosaic, fill: !!(scene && fill),
+    render, mosaic, fill: !!(scene && fill && neighbors.length),
     date: scene ? scene.date : '', cloud: scene ? scene.cloud : null, provider: { id: sensorId, short: s.name, name: s.name },
     attribution: s.attribution, cite: `${s.cite}. ${note}; representación «${rName}». Consultado el ${today()}`,
   };
@@ -233,14 +232,15 @@ export async function exportBands(sensorId, bboxLL, mosaic, maxPx = 560, signal)
   const { b, w, h } = gridFor(bboxLL, maxPx);
   const p = new URLSearchParams({
     bbox: b.join(','), bboxSR: '3857', imageSR: '3857', size: `${w},${h}`, format: 'tiff', pixelType: 'U16', f: 'image',
-    renderingRule: JSON.stringify({ rasterFunction: 'None' }), bandIds: s.bands.join(','), mosaicRule: JSON.stringify(mosaic), interpolation: 'RSP_BilinearInterpolation',
+    renderingRule: JSON.stringify({ rasterFunction: 'None' }), bandIds: s.bands.join(','), interpolation: 'RSP_BilinearInterpolation',
   });
+  if (mosaic) p.set('mosaicRule', JSON.stringify(mosaic));
   const r = await fetch(`${s.url}/exportImage?${p}`, { signal });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const buf = await r.arrayBuffer();
   if (buf.byteLength < 2000) {
     const t = new TextDecoder().decode(buf);
-    throw new Error(/error|exception/i.test(t) ? t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160) : 'el servidor no devolvió la imagen');
+    throw new Error(/error|exception/i.test(t) ? t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160) : 'el servidor devolvió una imagen vacía para esta vista; probá con una fecha fija o acercando el mapa');
   }
   const tiff = await fromArrayBuffer(buf);
   const image = await tiff.getImage();

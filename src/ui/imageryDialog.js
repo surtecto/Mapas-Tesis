@@ -104,12 +104,12 @@ export function openImageryDialog(app, { tab } = {}) {
       paintScenes();
     });
     const addScene = (sc) => {
-      addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, maxCloud: Math.max(0.2, ui.cloud / 100) }), { opacity: 1 });
+      addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, neighbors: ui.scenes || [] }), { opacity: 1 });
       app.toast(`Imagen agregada: ${s.name} del ${sc.date.split('-').reverse().join('/')}${ui.fill ? ', con huecos completados por fechas cercanas' : ''}.`);
     };
     const compare = (sc) => {
       const prev = app.state.layers.filter((l) => l.def === 'svc' && l.svc.type === 'svc-image');
-      const ls = addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, maxCloud: Math.max(0.2, ui.cloud / 100) }), { opacity: 1 });
+      const ls = addLayer(app, sceneLayerDef(ui.sensor, sc, ui.render, { fill: ui.fill, neighbors: ui.scenes || [] }), { opacity: 1 });
       if (prev.length) {
         // la nueva va encima con cortina al 50 %: a la izquierda se ve la nueva, a la derecha la anterior
         const other = prev[prev.length - 1];
@@ -130,7 +130,7 @@ export function openImageryDialog(app, { tab } = {}) {
         el('div', { class: 'wf-row' }, fld('Desde', fromIn), fld('Hasta', toIn)),
         fld('Estación', selectOf(ui, 'season', SEASONS)),
         fld('Nubosidad máxima', el('div', { class: 'range-row' }, cloud, cloudOut)),
-        (() => { const c = el('input', { type: 'checkbox', checked: ui.fill }); c.addEventListener('change', () => { ui.fill = c.checked; }); return el('label', { class: 'check' }, c, el('span', {}, 'Completar los huecos con fechas cercanas (±20 días)')); })(),
+        (() => { const c = el('input', { type: 'checkbox', checked: ui.fill }); c.addEventListener('change', () => { ui.fill = c.checked; }); return el('label', { class: 'check' }, c, el('span', {}, 'Completar los huecos con las fechas cercanas de la lista (±20 días)')); })(),
         el('div', { class: 'btn-row' }, search,
           el('button', { type: 'button', class: 'btn ghost', onclick: () => { addLayer(app, sceneLayerDef(ui.sensor, null, ui.render)); app.toast(`Mosaico más despejado de ${s.name} agregado.`); } }, 'Agregar el mosaico más despejado'))),
       el('div', { class: 'img-results' }, list));
@@ -269,7 +269,7 @@ export function openImageryDialog(app, { tab } = {}) {
       try {
         const s = SENSORS[ui.kSensor];
         const src = sceneSel.value ? app.state.layers.find((l) => l.uid === sceneSel.value) : null;
-        const mosaic = src ? src.svc.mosaic : sceneLayerDef(ui.kSensor, null, 'None').mosaic;
+        const mosaic = src ? src.svc.mosaic : null;
         run.textContent = 'Descargando bandas…';
         const img = await exportBands(ui.kSensor, view(), mosaic, 560, ctl.signal);
         clearInterval(tick);
