@@ -255,6 +255,7 @@ export function openServicesDialog(app, { providerId = null } = {}) {
     app.commit('layers');
     app.ui.expanded.add(ls.uid);
     app.renderLeft();
+    app.keepInside();
     app.toast(`Capa agregada: ${def.name}${detail ? ` (${detail})` : ''}.`);
   }
 

@@ -159,6 +159,7 @@ function imageKeysOf(state) {
   const keys = new Set();
   ((state && state.interp && state.interp.sources) || []).forEach((s) => s.key && keys.add(s.key));
   if (state && state.modelRef && state.modelRef.key) keys.add(state.modelRef.key);
+  ((state && state.layers) || []).forEach((l) => { if (l.def === 'svc' && l.svc && l.svc.key) keys.add(l.svc.key); });
   return keys;
 }
 export async function collectImages() {

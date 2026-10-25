@@ -19,7 +19,8 @@ import Feature from 'ol/Feature.js';
 import { Style, Stroke, Fill, Text } from 'ol/style.js';
 import { getRenderPixel } from 'ol/render.js';
 import { getDef, defOf, RAMPS } from './catalog.js';
-import { swapCoords } from './services.js';
+import { swapCoords, serverError } from './services.js';
+import { landcoverRenderingRule, yearTime, paintLabels } from './imagery.js';
 import { EMBEDDED } from './embedded.js';
 import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
 import { hexToRgb, rgba, PT_MM } from './util.js';
@@ -156,6 +157,21 @@ function getRasterSource(ls, def, mctx) {
         url: def.url, params: { LAYERS: def.layers, FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.3.0', STYLES: def.styles || '' },
         // los servidores sin CORS se pueden ver, pero no leer: esas capas quedan fuera de la exportación
         projection: reqProj, crossOrigin: def.noCors ? undefined : 'anonymous', attributions: def.attribution, tileGrid: undefined, transition: 0, gutter: 0,
+      }));
+    }
+    return rasterSources.get(key);
+  }
+  if (def.type === 'svc-image' || def.type === 'svc-landcover') {
+    // imágenes por fecha (bloqueo de escenas) y coberturas con paleta propia (función Colormap del servidor)
+    const reqProj = /^(EPSG:3031|EPSG:6932)$/.test(mapProj) ? mapProj : 'EPSG:3857';
+    const params = def.type === 'svc-image'
+      ? { renderingRule: JSON.stringify({ rasterFunction: def.render }), mosaicRule: JSON.stringify(def.mosaic), format: 'jpgpng', interpolation: 'RSP_BilinearInterpolation' }
+      : { renderingRule: JSON.stringify(landcoverRenderingRule(def.classes)), time: yearTime(def.year), format: 'png32', interpolation: 'RSP_NearestNeighbor' };
+    const key = cacheKey(ls, `${def.type}|${reqProj}|${JSON.stringify(params)}`);
+    if (!rasterSources.has(key)) {
+      rasterSources.set(key, new TileArcGISRest({
+        url: def.url, params, projection: reqProj, crossOrigin: 'anonymous', attributions: def.attribution, transition: 0,
+        tileGrid: createXYZ({ extent: extentFromProjection(reqProj), tileSize: 512, maxZoom: 22 }),
       }));
     }
     return rasterSources.get(key);
@@ -425,7 +441,7 @@ async function getJSONStrict(url) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const t = await r.text();
   let j;
-  try { j = JSON.parse(t); } catch (e) { throw new Error(t.trim().startsWith('<') ? (t.match(/<ows:ExceptionText>([^<]+)/) || t.match(/<ServiceException[^>]*>([^<]+)/) || [0, 'el servidor respondió con un error'])[1].trim().slice(0, 160) : 'respuesta ilegible'); }
+  try { j = JSON.parse(t); } catch (e) { throw new Error(t.trim().startsWith('<') ? serverError(t) : 'respuesta ilegible'); }
   if (j && j.error) throw new Error(j.error.message || 'error del servidor');
   return j;
 }
@@ -524,6 +540,25 @@ function buildServiceVectorSource(ls, def, mctx) {
     },
   });
   return src;
+}
+
+// ---------- imágenes calculadas en el navegador (clasificación propia, mapa de cambios) ----------
+const paintedCache = new Map();
+function buildStaticImageLayer(ls, def, mctx, className) {
+  const layer = new ImageLayer({ className });
+  const classes = def.labels && def.classes ? JSON.stringify(def.classes.map((c) => [c.id != null ? c.id : c.v, c.color, c.show !== false])) : '';
+  const key = `${def.key}|${classes}`;
+  const apply = (url) => layer.setSource(new ImageStatic({ url, imageExtent: def.extent, projection: 'EPSG:3857', interpolate: false }));
+  if (!paintedCache.has(key)) {
+    const pr = getImage(def.key).then((v) => {
+      if (!v) throw new Error('falta la imagen calculada en este navegador: abrí el proyecto exportado que la incluye o volvé a calcularla');
+      return def.labels ? paintLabels(v.blob, def.classes) : v.url;
+    });
+    pr.catch(() => paintedCache.delete(key));
+    paintedCache.set(key, pr);
+  }
+  paintedCache.get(key).then(apply).catch((e) => { if (mctx.onLayerError) mctx.onLayerError(ls, e); });
+  return layer;
 }
 
 // ---------- planos georreferenciados ----------
@@ -740,12 +775,22 @@ function attachClip(layer, ls, mctx) {
   layer.on('prerender', (e) => {
     const cur = mctx.getLayerState(ls.uid) || ls;
     layer._clipped = false;
-    if (!cur.clip || cur.clip === 'none' || !mctx.map) return;
+    const sw = cur.params && cur.params.swipe != null && cur.params.swipe !== '' ? Number(cur.params.swipe) : null;
+    const hasSwipe = sw != null && Number.isFinite(sw) && sw < 100;
+    if ((!cur.clip || cur.clip === 'none' || !mctx.map) && !hasSwipe) return;
     const ctx = e.context;
     ctx.save();
     layer._clipped = true;
+    if (hasSwipe) {
+      // cortina para comparar: la capa se ve solo a un lado de la línea
+      const W = ctx.canvas.width, H = ctx.canvas.height, x = (W * Math.max(0, sw)) / 100;
+      ctx.beginPath();
+      if (cur.params.swipeSide === 'right') ctx.rect(x, 0, W - x, H); else ctx.rect(0, 0, x, H);
+      ctx.clip();
+    }
+    if (!cur.clip || cur.clip === 'none' || !mctx.map) return;
     if (cur.clip === 'land') {
-      if (!landClipPath(ctx, e, mctx)) { ctx.restore(); layer._clipped = false; }
+      if (!landClipPath(ctx, e, mctx) && !hasSwipe) { ctx.restore(); layer._clipped = false; }
       return;
     }
     ctx.beginPath();
@@ -789,6 +834,8 @@ export function buildOlLayer(ls, mctx) {
     const src = buildWfsViewSource(ls, def, mctx);
     layer = new VectorLayer({ source: src, style: makeVectorStyleFn(getLs, def, mctx), declutter: decl, className });
     layer._viewSource = src;
+  } else if (def.type === 'svc-img') {
+    layer = buildStaticImageLayer(ls, def, mctx, className);
   } else if (def.kind === 'raster') {
     if (def.type === 'terrarium') layer = buildDemLayer(ls, def, mctx, className);
     else {

@@ -85,6 +85,21 @@ async function fetchText(url, ms = 25000) {
     throw e;
   } finally { clearTimeout(t); }
 }
+// Traduce las excepciones típicas de GeoServer/ArcGIS a algo que se entienda
+export function serverError(text) {
+  const m = String(text).match(/<(?:ows:)?ExceptionText>([\s\S]*?)<\/(?:ows:)?ExceptionText>/) || String(text).match(/<ServiceException[^>]*>([\s\S]*?)<\/ServiceException>/);
+  const raw = (m ? m[1] : String(text)).replace(/\s+/g, ' ').trim();
+  if (/connection|pool|timeout waiting/i.test(raw)) return 'el servidor está sobrecargado (no pudo conectarse a su base de datos); probá en unos minutos';
+  if (/Unknown|could not find|not find feature type|no such/i.test(raw)) return 'el servidor no reconoce esa capa';
+  if (/out of memory|too many|limit/i.test(raw)) return 'el pedido es demasiado grande: acercá la vista o filtrá';
+  return raw.slice(0, 160) || 'el servidor respondió con un error';
+}
+function parseJSONorError(t) {
+  const s = t.trim();
+  if (s.startsWith('<')) throw new Error(serverError(s));
+  return JSON.parse(s);
+}
+
 async function fetchJSON(url, ms) {
   const t = await fetchText(url, ms);
   const j = JSON.parse(t);
@@ -290,10 +305,11 @@ export async function probeWfs(def, bboxLL) {
   const p = new URLSearchParams({ service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: def.typeName, outputFormat: def.outputFormat, srsName: 'EPSG:4326', maxFeatures: '5' });
   if (bboxLL) p.set('bbox', `${bboxLL.map((v) => v.toFixed(5)).join(',')},EPSG:4326`);
   let j = null;
-  try { j = JSON.parse(await fetchText(`${def.url}?${p}`)); } catch (e) { j = null; }
+  let firstErr = null;
+  try { j = parseJSONorError(await fetchText(`${def.url}?${p}`)); } catch (e) { j = null; firstErr = e; }
   if ((!j || !j.features || !j.features.length) && bboxLL) {
     p.delete('bbox');
-    try { j = JSON.parse(await fetchText(`${def.url}?${p}`)); } catch (e) { throw new Error(`no se pudo leer la capa (${e.message})`); }
+    try { j = parseJSONorError(await fetchText(`${def.url}?${p}`)); } catch (e) { throw new Error((firstErr || e).message); }
   }
   if (!j || !j.features) throw new Error('el servidor no devolvió GeoJSON para esta capa');
   const f = j.features.find((x) => x.geometry);

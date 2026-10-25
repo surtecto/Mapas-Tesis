@@ -8,6 +8,8 @@ import { newLayerState } from '../state.js';
 import { fileToGeoJSON } from './importers.js';
 import { projInfo } from '../projections.js';
 import { openServicesDialog } from './servicesDialog.js';
+import { openImageryDialog } from './imageryDialog.js';
+import { SENSORS, LANDCOVER, LC_PALETTES } from '../imagery.js';
 import { downloadBlob } from '../util.js';
 import GeoJSONFormat from 'ol/format/GeoJSON.js';
 
@@ -69,6 +71,9 @@ export function renderLayersPanel(app, root) {
     el('button', { type: 'button', class: 'svc-open', onclick: () => openServicesDialog(app) },
       el('strong', {}, 'Servicios oficiales'),
       el('span', {}, 'IGN, INA, INDEC, INTA, Ambiente, SEGEMAR, ARBA, Estadística bonaerense y el catálogo completo de IDERA. Capas vectoriales que se pueden restilizar, filtrar y exportar.')),
+    el('button', { type: 'button', class: 'svc-open img', onclick: () => openImageryDialog(app) },
+      el('strong', {}, 'Imágenes y coberturas'),
+      el('span', {}, 'Sentinel-2 y Landsat por fecha (desde 1972), mosaicos anuales, cobertura del suelo 2017–2025 con superficies y cambios, y clasificación propia.')),
     catalogView(app),
     el('h2', { class: 'panel-h' }, 'Datos propios'),
     importView(app),
@@ -171,6 +176,29 @@ function serviceEditor(app, ls, def) {
   if (def.noCors) box.append(el('p', { class: 'warn-note' }, 'Solo para ver: el servidor no habilita CORS, así que la capa no se puede restilizar ni entra en la exportación.'));
   if (def.kind === 'raster') {
     if (def.legendUrl) box.append(el('div', { class: 'svc-legend' }, el('span', { class: 'note' }, 'Leyenda del servidor:'), el('img', { src: def.legendUrl, alt: `Leyenda de ${ls.name}`, loading: 'lazy' })));
+    if (def.type === 'svc-image') {
+      const sen = SENSORS[def.sensor];
+      if (def.date) box.append(el('p', { class: 'note' }, `Fecha: ${def.date.split('-').reverse().join('/')}${def.cloud != null ? `, nubes ${Math.round(def.cloud * 100)} %` : ''}.`));
+      if (sen) box.append(field('Representación', select(ls.svc, 'render', sen.renders, { onChange: (v) => {
+        const rn = (sen.renders.find((r) => r[0] === v) || [v, v])[1];
+        ls.svc.cite = ls.svc.cite.replace(/representación «[^»]*»/, `representación «${rn}»`);
+        reload();
+      } })));
+    }
+    if (def.type === 'svc-landcover') {
+      box.append(field('Año', select(ls.svc, 'year', LANDCOVER.years.map((y) => [y, String(y)]), { numeric: true, onChange: (v) => {
+        ls.svc.cite = ls.svc.cite.replace(/Año \d{4}/, `Año ${v}`);
+        if (/Cobertura del suelo \d{4}/.test(ls.name)) ls.name = `Cobertura del suelo ${v}`;
+        if (ls.legend && /Cobertura del suelo \d{4}/.test(ls.legend.label || '')) ls.legend.label = ls.name;
+        reload(); app.commit('overlay');
+      } })));
+      box.append(el('div', { class: 'btn-row wrap' }, el('span', { class: 'note' }, 'Paleta:'), ...Object.entries(LC_PALETTES).map(([k, p]) => button(p.name, () => {
+        ls.svc.classes.forEach((c) => { if (p.colors[c.v]) c.color = p.colors[c.v]; });
+        reload(); app.commit('overlay');
+      }, { kind: 'small ghost' }))));
+    }
+    if (def.classes) box.append(classEditor(app, ls, reload));
+    box.append(swipeEditor(app, ls));
     return box;
   }
   // modo de carga
@@ -233,6 +261,39 @@ function serviceEditor(app, ls, def) {
     downloadBlob(new Blob([JSON.stringify(obj)], { type: 'application/geo+json' }), `${(ls.name || 'capa').replace(/[^\wáéíóúñ-]+/gi, '-').slice(0, 50)}.geojson`);
   }, { kind: 'small ghost' })));
   return box;
+}
+
+// Clases de una cobertura o de una clasificación propia: nombre, color y visibilidad
+function classEditor(app, ls, reload) {
+  const wrap = el('div', { class: 'class-list' });
+  const total = ls.svc.classes.reduce((a, c) => a + (c.area || 0), 0);
+  for (const c of ls.svc.classes) {
+    const vis = el('input', { type: 'checkbox', checked: c.show !== false, 'aria-label': `Mostrar ${c.name}` });
+    vis.addEventListener('change', () => { c.show = vis.checked; reload(); app.commit('overlay'); });
+    const col = el('input', { type: 'color', value: c.color, 'aria-label': `Color de ${c.name}` });
+    col.addEventListener('change', () => { c.color = col.value; reload(); app.commit('overlay'); });
+    const nm = el('input', { type: 'text', value: c.name, 'aria-label': 'Nombre de la clase' });
+    nm.addEventListener('change', () => { c.name = nm.value.trim() || c.name; app.commit('overlay'); });
+    wrap.append(el('div', { class: 'class-row' }, vis, col, nm, c.area ? el('span', { class: 'class-area', title: c.ndvi != null ? `NDVI medio ${c.ndvi}` : '' }, `${total ? Math.round((c.area / total) * 100) : 0} %`) : el('span')));
+  }
+  return details('Clases', true, wrap, el('p', { class: 'note' }, 'Ocultar una clase la deja transparente en el mapa y la saca de la leyenda.'));
+}
+
+// Cortina para comparar dos imágenes (o una imagen y la base): la capa se ve solo a un lado
+function swipeEditor(app, ls) {
+  const p = ls.params;
+  const on = p.swipe != null && p.swipe !== '' && Number(p.swipe) < 100;
+  const val = el('input', { type: 'range', min: 0, max: 100, step: 1, value: on ? p.swipe : 50, disabled: !on });
+  const out = el('output', {}, on ? `${p.swipe} %` : '');
+  const chk = el('input', { type: 'checkbox', checked: on });
+  chk.addEventListener('change', () => { p.swipe = chk.checked ? Number(val.value) : null; val.disabled = !chk.checked; out.textContent = chk.checked ? `${p.swipe} %` : ''; app.commit('layers'); });
+  val.addEventListener('input', () => { p.swipe = Number(val.value); out.textContent = `${p.swipe} %`; app.commit('layers', { history: false }); });
+  val.addEventListener('change', () => app.commit('layers'));
+  return details('Cortina para comparar', on,
+    el('label', { class: 'check' }, chk, el('span', {}, 'Mostrar esta capa solo a un lado de una línea vertical')),
+    el('div', { class: 'range-row' }, val, out),
+    field('Lado visible', select(p, 'swipeSide', [['left', 'Izquierda'], ['right', 'Derecha']], { onChange: () => app.commit('layers') })),
+    el('p', { class: 'note' }, 'Con dos imágenes de distinta fecha, la de arriba con cortina deja ver la de abajo del otro lado. La exportación respeta el corte.'));
 }
 
 function demEditor(app, ls) {

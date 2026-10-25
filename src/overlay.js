@@ -567,6 +567,15 @@ export function legendItems(state) {
   for (let i = state.layers.length - 1; i >= 0; i--) {
     const ls = state.layers[i];
     if (ls.def === 'interp') { if (ls.visible && ls.legend && ls.legend.show !== false) interpLegendItems(state, ls, items); continue; }
+    if (ls.def === 'svc' && ls.svc && ls.svc.classes) {
+      // coberturas y clasificaciones: una entrada por clase visible
+      if (ls.visible && ls.legend && ls.legend.show) {
+        for (const c of ls.svc.classes.filter((k) => k.show !== false)) {
+          items.push({ key: `layer:${ls.uid}:${c.id != null ? c.id : c.v}`, label: c.name, sym: { type: 'polygon', pg: { fill: c.color, fillOpacity: 1, stroke: '#6b6b6b', strokeWidth: 0.15, strokeOpacity: 1, dash: 'solid', pattern: 'none' } } });
+        }
+      }
+      continue;
+    }
     if (!ls.visible || !ls.legend || !ls.legend.show || !ls.style) continue;
     const def = ls.def === 'user' ? { geom: userGeomType(ls) } : defOf(ls);
     if (!def || !def.geom) continue;

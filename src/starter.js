@@ -86,6 +86,13 @@ export function buildFirstMap(meta, area, opts = {}) {
   s.caption = { figure: 'Figura 1', lead: area && area.name ? `Localización de ${area.name}.` : 'Mapa de localización del área de estudio.', withAuthor: true };
   const theme = getTheme(opts.themeId || meta.themeId);
   if (theme) applyTheme(s, theme, { recolorCategories: false, keepBackground: opts.start === 'satellite' });
+  if (opts.start === 'satellite') {
+    // sobre la imagen, el contorno del área y los elementos de la composición necesitan contraste propio
+    const al = s.layers.find((l) => l.params && l.params.sem === 'study-area' && l.def === 'user');
+    if (al) { al.style.polygon = { ...al.style.polygon, stroke: '#ffd84d', strokeWidth: 1.8, fillOpacity: 0 }; al.style.point = { ...al.style.point, fill: '#ffd84d', stroke: '#1d1d1d' }; }
+    s.scalebar = mergeDeep(s.scalebar, { bg: '#ffffff', bgOpacity: 0.85 });
+    s.north = mergeDeep(s.north, { bg: '#ffffff', bgOpacity: 0.85 });
+  }
   return s;
 }
 
