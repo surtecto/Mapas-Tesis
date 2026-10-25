@@ -3,6 +3,7 @@ import { el, clear, downloadBlob, fmtInt } from '../util.js';
 import { field, inlineFields, select, check, range, button, text } from './forms.js';
 import { exportSize, renderRaster, renderSvg, canvasToPng, canvasToJpeg, canvasToTiff, canvasToPdf } from '../exporter.js';
 import { getMedia, exportDpi, checkLegibility } from '../media.js';
+import { defOf } from '../catalog.js';
 
 const FORMATS = [
   ['png', 'PNG (sin pérdida)'],
@@ -29,6 +30,7 @@ export function openExportDialog(app) {
   const progress = el('div', { class: 'export-progress', 'aria-live': 'polite' });
   const qualityRow = el('div', {});
   const legib = checkLegibility(st);
+  const noCors = st.layers.filter((l) => l.visible && defOf(l) && defOf(l).noCors);
   const updateSummary = () => {
     const dpi = Number(opts.dpi);
     const { W, H, ok } = exportSize(st, dpi);
@@ -42,6 +44,7 @@ export function openExportDialog(app) {
       opts.format === 'svg' ? el('p', { class: 'note' }, 'Cada capa del mapa se incrusta como imagen en su propio grupo; textos, leyenda, norte, escala, conectores y sitios quedan como vectores editables.') : null,
       st.render.colorMode === 'grises' ? el('p', { class: 'note' }, 'Salida en escala de grises (Figura › Destino).') : null,
       legib.issues.length ? el('p', { class: 'warn-note' }, `Para «${media.name}» hay ${legib.issues.length} avisos de legibilidad (Figura › Destino de la figura).`) : null,
+      noCors.length ? el('p', { class: 'warn-note' }, `Quedan fuera de la exportación porque su servidor no lo permite (sin CORS): ${noCors.map((l) => `«${l.name}»`).join(', ')}.`) : null,
     );
     clear(qualityRow);
     if (opts.format === 'jpeg' || (opts.format === 'pdf' && !opts.lossless)) qualityRow.append(field('Calidad JPEG', range(opts, 'quality', { min: 0.6, max: 1, step: 0.01, format: (v) => `${Math.round(v * 100)}%` })));

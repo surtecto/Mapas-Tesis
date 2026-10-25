@@ -285,6 +285,30 @@ export function classLabelStyle(cls) { return CLASS_LABEL[cls] || CLASS_LABEL.is
 
 // ---------- funciones de estilo de capas vectoriales ----------
 // ctx: { pxPerMm (px CSS por mm de papel), pixelRatio }
+// Filtro por atributos hecho en el navegador: [{ field, op, value }] con op =, ≠, >, <, ≥, ≤, contiene, vacío
+const normTxt = (v) => String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+export function passFilter(feature, rules, mode = 'all') {
+  const test = (r) => {
+    if (!r || !r.field) return true;
+    const v = feature.get(r.field);
+    const a = Number(v), b = Number(r.value);
+    const num = r.value !== '' && Number.isFinite(a) && Number.isFinite(b);
+    switch (r.op) {
+      case '=': return num ? a === b : normTxt(v) === normTxt(r.value);
+      case '≠': return num ? a !== b : normTxt(v) !== normTxt(r.value);
+      case '>': return num && a > b;
+      case '<': return num && a < b;
+      case '≥': return num && a >= b;
+      case '≤': return num && a <= b;
+      case 'contiene': return normTxt(v).includes(normTxt(r.value));
+      case 'vacío': return v == null || String(v).trim() === '';
+      case 'no vacío': return !(v == null || String(v).trim() === '');
+      default: return true;
+    }
+  };
+  return mode === 'any' ? rules.some(test) : rules.every(test);
+}
+
 export function makeVectorStyleFn(getLayerState, def, ctx) {
   const cache = new Map();
   let cacheVersion = -1;
@@ -292,6 +316,8 @@ export function makeVectorStyleFn(getLayerState, def, ctx) {
   return function styleFn(feature) {
     const layerState = getLayerState();
     if (!layerState) return null;
+    const flt = layerState.params && layerState.params.filter;
+    if (flt && flt.length && !passFilter(feature, flt, layerState.params.filterMode)) return null;
     const st = layerState.style;
     if (layerState._styleVersion !== cacheVersion || ctx.pxPerMm !== cacheScale) {
       cache.clear(); cacheVersion = layerState._styleVersion; cacheScale = ctx.pxPerMm;

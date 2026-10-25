@@ -5,7 +5,7 @@ import { putImage, ingestFile, ingestUrl, getImage, deleteImage } from './images
 import { georefModel } from './layers.js';
 import { modelSummary, methodInfo, fmtM } from './georef.js';
 import { sourceCitation } from './caption.js';
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 
 export function activeVersion(state) {
   const it = state.interp;
@@ -50,7 +50,7 @@ export function ensureGeorefLayer(app, src) {
     ls.legend.show = false;
     // encima de las bases ráster y debajo de los vectores
     let idx = 0;
-    st.layers.forEach((l, i) => { const d = getDef(l.def); if (l.def === 'georef' || (d && d.kind === 'raster')) idx = i + 1; });
+    st.layers.forEach((l, i) => { const d = defOf(l); if (l.def === 'georef' || (d && d.kind === 'raster')) idx = i + 1; });
     st.layers.splice(idx, 0, ls);
   }
   ls.visible = true;

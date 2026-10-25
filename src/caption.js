@@ -1,5 +1,5 @@
 // Epígrafe científico: proyección, datum, sitios y fuentes de las capas visibles
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 import { projInfo } from './projections.js';
 import { formatDMS } from './util.js';
 import { georefModel } from './layers.js';
@@ -35,7 +35,7 @@ export function visibleDefs(state) {
   const insetOverrides = state.insets.flatMap((z) => Object.entries(z.layers || {}).filter(([, v]) => v === true).map(([k]) => k));
   for (const ls of state.layers) {
     if (!ls.visible && !insetOverrides.includes(ls.uid)) continue;
-    const d = ls.def === 'user' ? { cite: `${ls.name} (datos propios)`, attribution: ls.name } : getDef(ls.def);
+    const d = ls.def === 'user' ? { cite: `${ls.name} (datos propios)`, attribution: ls.name } : defOf(ls);
     if (!d || !d.cite) continue;
     if (seen.has(d.cite)) continue;
     seen.add(d.cite);

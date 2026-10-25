@@ -4,7 +4,7 @@ import View from 'ol/View.js';
 import VectorLayer from 'ol/layer/Vector.js';
 import { defaults as defaultInteractions } from 'ol/interaction/defaults.js';
 import DragPan from 'ol/interaction/DragPan.js';
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 import { buildOlLayer } from './layers.js';
 import { ensureProjection, lonLatTo, toLonLatFrom, resolutionFromMpm, mpmFromResolution } from './projections.js';
 
@@ -120,7 +120,9 @@ export class MapCtx {
   }
 
   layerVisible(ls) {
-    const def = getDef(ls.def);
+    const def = defOf(ls);
+    // un servidor sin CORS no deja leer sus imágenes: la capa se ve en pantalla pero no entra en la exportación
+    if (this.forExport && def && def.noCors) return false;
     if (this.role === 'inset') {
       const ins = this.inset();
       const o = ins && ins.layers ? ins.layers[ls.uid] : undefined;
@@ -134,7 +136,7 @@ export class MapCtx {
   }
 
   layerKey(ls) {
-    const def = getDef(ls.def);
+    const def = defOf(ls);
     let k = `${ls.rev}|${this.projection}`;
     if (ls.style && ls.style.label) {
       k += `|${ls.style.label.show && ls.style.label.declutter ? 'd' : ''}`;

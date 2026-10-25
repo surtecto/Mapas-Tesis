@@ -17,8 +17,9 @@ export function renderThesisPanel(app, root) {
   clear(root);
   const st = app.state;
   const th = st.thesis;
+  const pc = projectCard(app);
+  if (pc) root.append(pc);
   root.append(
-    projectCard(app),
     el('div', { class: 'panel-intro' }, el('p', {}, 'El tema y el lugar de este mapa (por defecto, los del proyecto): la aplicación los lee y propone un lenguaje gráfico (estilo, proyección, capas), junto con preguntas para que la figura no afirme más de lo que la investigación sostiene.')),
     themeForm(app),
     readingView(app),

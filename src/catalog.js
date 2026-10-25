@@ -356,6 +356,13 @@ export function getDef(id) {
   return null;
 }
 
+// Definición de una capa del mapa: las del catálogo fijo y las de servicios oficiales (que llevan su definición adentro)
+export function defOf(ls) {
+  if (!ls) return null;
+  if (ls.def === 'svc') return ls.svc || null;
+  return getDef(ls.def);
+}
+
 // Rampas de color para el DEM analítico.
 // 'sea' se aplica de la cota mínima a 0 m y 'land' de 0 m a la máxima; 'all' recorre todo el rango.
 export const RAMPS = {

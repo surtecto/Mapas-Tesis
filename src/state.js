@@ -45,6 +45,18 @@ export function newLayerState(defId, over = {}) {
   return mergeDeep(ls, over);
 }
 
+// Capa de un servicio oficial: lleva su definición adentro (url, capa, geometría, campos, cita)
+export function newServiceLayerState(svcDef, over = {}) {
+  const ls = {
+    uid: uid('L'), def: 'svc', svc: deepClone(svcDef), name: svcDef.name, visible: true, opacity: svcDef.kind === 'raster' ? 0.85 : 1, blend: 'normal',
+    adjust: { brightness: 100, contrast: 100, saturate: 100, grayscale: 0 }, clip: 'none',
+    style: svcDef.style ? deepClone(svcDef.style) : null, params: { filter: [] },
+    legend: { show: svcDef.kind === 'vector', label: svcDef.name }, insets: {}, rev: 0, _styleVersion: 0,
+  };
+  delete ls.svc.style;
+  return mergeDeep(ls, over);
+}
+
 export function mergeDeep(target, src) {
   for (const [k, v] of Object.entries(src || {})) {
     if (v && typeof v === 'object' && !Array.isArray(v) && target[k] && typeof target[k] === 'object' && !Array.isArray(target[k])) mergeDeep(target[k], v);
@@ -167,7 +179,7 @@ export function emptyState() {
 export function normalizeState(s) {
   const base = emptyState();
   const out = mergeDeep(base, s || {});
-  out.layers = (out.layers || []).filter((l) => getDef(l.def) || l.def === 'user').map((l) => {
+  out.layers = (out.layers || []).filter((l) => getDef(l.def) || l.def === 'user' || (l.def === 'svc' && l.svc)).map((l) => {
     if (l.def === 'user') return l;
     const fresh = newLayerState(l.def);
     if (l.def === 'georef' || l.def === 'interp') fresh.legend.show = false;

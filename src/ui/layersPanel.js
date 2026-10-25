@@ -2,17 +2,23 @@
 import { el, clear, uid } from '../util.js';
 import { field, inlineFields, num, color, select, check, range, button, details, text } from './forms.js';
 import { styleEditor, geomOf } from './styleEditor.js';
-import { CATALOG, GROUPS, getDef, RAMPS, baseStyle, FONTS } from '../catalog.js';
+import { CATALOG, GROUPS, getDef, defOf, RAMPS, baseStyle, FONTS } from '../catalog.js';
 import { DASH_OPTIONS } from '../styles.js';
 import { newLayerState } from '../state.js';
 import { fileToGeoJSON } from './importers.js';
 import { projInfo } from '../projections.js';
+import { openServicesDialog } from './servicesDialog.js';
+import { downloadBlob } from '../util.js';
+import GeoJSONFormat from 'ol/format/GeoJSON.js';
 
 const BLENDS = [['normal', 'Normal'], ['multiply', 'Multiplicar (sombreado sobre imagen)'], ['screen', 'Trama (aclarar)'], ['overlay', 'Superponer'], ['soft-light', 'Luz suave'], ['darken', 'Oscurecer'], ['lighten', 'Aclarar']];
 const CLIPS = [['none', 'Sin recorte'], ['land', 'Solo sobre tierra y hielo (según la costa SCAR ADD)'], ['inside', 'Solo dentro del Sector Antártico Argentino'], ['outside', 'Solo fuera del Sector Antártico Argentino']];
 
 function typeBadge(def, ls) {
   if (ls.def === 'user') return 'Propia';
+  if (def.type === 'svc-wfs') return def.provider ? def.provider.short.slice(0, 9) : 'WFS';
+  if (def.type === 'svc-arcgis') return def.provider ? def.provider.short.slice(0, 9) : 'ArcGIS';
+  if (ls.def === 'svc' && def.noCors) return 'Solo ver';
   if (def.type === 'georef') return 'Plano';
   if (def.type === 'interp') return ls.params && ls.params.ghost ? 'Compara' : 'Interpr.';
   if (def.type === 'wfs-view') return 'IGN';
@@ -31,7 +37,7 @@ export function insertIndexFor(state, def) {
     // las bases ráster van debajo de los planos georreferenciados
     const gi = def.type === 'georef' ? -1 : layers.findIndex((l) => l.def === 'georef');
     let idx = 0;
-    layers.forEach((l, i) => { const d = getDef(l.def); if (d && d.kind === 'raster' && (gi < 0 || i < gi)) idx = i + 1; });
+    layers.forEach((l, i) => { const d = defOf(l); if (d && d.kind === 'raster' && (gi < 0 || i < gi)) idx = i + 1; });
     return idx;
   }
   const g = layers.findIndex((l) => l.def === 'graticule');
@@ -60,6 +66,9 @@ export function renderLayersPanel(app, root) {
       el('p', {}, 'Arrastrá para cambiar el orden: la capa de arriba se dibuja encima. Abrí una capa para ajustar su estilo, opacidad, recorte o visibilidad en los zooms.')),
     stack,
     el('h2', { class: 'panel-h' }, 'Agregar capas'),
+    el('button', { type: 'button', class: 'svc-open', onclick: () => openServicesDialog(app) },
+      el('strong', {}, 'Servicios oficiales'),
+      el('span', {}, 'IGN, INA, INDEC, INTA, Ambiente, SEGEMAR, ARBA, Estadística bonaerense y el catálogo completo de IDERA. Capas vectoriales que se pueden restilizar, filtrar y exportar.')),
     catalogView(app),
     el('h2', { class: 'panel-h' }, 'Datos propios'),
     importView(app),
@@ -67,7 +76,7 @@ export function renderLayersPanel(app, root) {
 }
 
 function layerRow(app, ls) {
-  const def = ls.def === 'user' ? { name: ls.name, kind: 'vector', type: 'user' } : getDef(ls.def);
+  const def = ls.def === 'user' ? { name: ls.name, kind: 'vector', type: 'user' } : defOf(ls);
   const open = app.ui.expanded.has(ls.uid);
   const li = el('li', { class: `layer-row${open ? ' open' : ''}${ls.visible ? '' : ' hidden-layer'}`, dataset: { uid: ls.uid } });
   const vis = el('input', { type: 'checkbox', checked: ls.visible, 'aria-label': `Mostrar ${ls.name}` });
@@ -105,6 +114,7 @@ function layerBody(app, ls, def) {
     if (def.type === 'georef') body.append(field('Modo de fusión', select(ls, 'blend', BLENDS, { onChange: () => app.commit('layers') })));
     return body;
   }
+  if (ls.def === 'svc') body.append(serviceEditor(app, ls, def));
   if (def.type === 'wfs-view') {
     body.append(el('p', { class: 'note' }, `Se pide al IGN solo lo que entra en la vista, a escalas mayores que 1:${(def.maxMpm * 1000).toLocaleString('es-AR')}. ${ls.params && ls.params.force ? 'Carga forzada a escala menor (puede tardar).' : ''}`));
     body.append(check(ls.params, 'force', 'Cargar también a escala menor (más lento)', { onChange: () => { ls.rev += 1; app.commit('layers'); } }));
@@ -149,6 +159,80 @@ function layerBody(app, ls, def) {
     body.append(details('Visibilidad en los zooms', false, box));
   }
   return body;
+}
+
+// Capas de servicios oficiales: origen, modo de carga, filtros y descarga
+const OPS = [['=', 'es igual a'], ['≠', 'no es'], ['contiene', 'contiene'], ['>', 'mayor que'], ['<', 'menor que'], ['≥', 'desde'], ['≤', 'hasta'], ['vacío', 'está vacío'], ['no vacío', 'no está vacío']];
+function serviceEditor(app, ls, def) {
+  const box = el('div', { class: 'svc-editor' });
+  const reload = () => { ls.rev += 1; app.commit('layers'); app.renderLeft(); };
+  const src = def.provider ? def.provider.name : '';
+  box.append(el('p', { class: 'note' }, `${src}${def.typeName ? ` · ${def.typeName}` : def.layers ? ` · ${def.layers}` : ''}`));
+  if (def.noCors) box.append(el('p', { class: 'warn-note' }, 'Solo para ver: el servidor no habilita CORS, así que la capa no se puede restilizar ni entra en la exportación.'));
+  if (def.kind === 'raster') {
+    if (def.legendUrl) box.append(el('div', { class: 'svc-legend' }, el('span', { class: 'note' }, 'Leyenda del servidor:'), el('img', { src: def.legendUrl, alt: `Leyenda de ${ls.name}`, loading: 'lazy' })));
+    return box;
+  }
+  // modo de carga
+  const mode = { v: def.whole ? 'whole' : 'view' };
+  box.append(field('Qué se carga', select(mode, 'v', [['view', 'Lo que entra en la vista (a escala de detalle)'], ['whole', 'Toda la capa de una vez']], {
+    onChange: (v) => { ls.svc.whole = v === 'whole'; reload(); },
+  }), def.hits != null ? `La capa tiene ${def.hits.toLocaleString('es-AR')} objetos.` : ''));
+  if (!def.whole) {
+    box.append(field('Escala máxima para cargar', select({ v: String(def.maxMpm) }, 'v', [['600', '1:600.000'], ['1500', '1:1.500.000'], ['2500', '1:2.500.000'], ['6000', '1:6.000.000'], ['15000', '1:15.000.000']], {
+      onChange: (v) => { ls.svc.maxMpm = Number(v); reload(); },
+    })));
+  }
+  const layer = app.mainCtx && app.mainCtx.olLayers.get(ls.uid);
+  const s = layer && layer.getSource && layer.getSource();
+  if (s && s._truncated) box.append(el('p', { class: 'warn-note' }, 'El servidor devolvió el máximo de objetos que permite: acercá la vista o filtrá para ver todo.'));
+  // filtro del servidor (CQL en GeoServer, where en ArcGIS)
+  const fld = def.type === 'svc-arcgis' ? 'where' : 'cql';
+  const srvIn = el('input', { type: 'text', value: def[fld] || '', placeholder: def.type === 'svc-arcgis' ? "PARTIDO = 'San Andrés de Giles'" : "nam = 'San Andrés de Giles'" });
+  box.append(details('Filtro en el servidor', !!def[fld],
+    el('p', { class: 'note' }, def.type === 'svc-arcgis' ? 'Expresión SQL del servidor ArcGIS: solo llegan los objetos que la cumplen.' : 'Expresión CQL (GeoServer): solo llegan los objetos que la cumplen. Los textos van entre comillas simples.'),
+    el('div', { class: 'btn-row' }, srvIn, button('Aplicar', () => { ls.svc[fld] = srvIn.value.trim(); reload(); }, { kind: 'small' }))));
+  // filtro en el navegador por atributos
+  const fields = def.fields && def.fields.length ? def.fields : [];
+  if (!ls.params.filter) ls.params.filter = [];
+  const rules = el('div', { class: 'flt-rules' });
+  const paintRules = () => {
+    clear(rules);
+    ls.params.filter.forEach((r, i) => {
+      const fSel = el('select', { 'aria-label': 'Campo' }, ...fields.map((f) => el('option', { value: f, selected: r.field === f }, f)));
+      const oSel = el('select', { 'aria-label': 'Condición' }, ...OPS.map(([v, t]) => el('option', { value: v, selected: r.op === v }, t)));
+      const vIn = el('input', { type: 'text', value: r.value || '', 'aria-label': 'Valor', list: `vals-${ls.uid}-${i}` });
+      const dl = el('datalist', { id: `vals-${ls.uid}-${i}` });
+      const fillVals = () => {
+        clear(dl);
+        const vals = new Set();
+        (s && s.getFeatures ? s.getFeatures() : []).slice(0, 3000).forEach((f) => { const v = f.get(r.field); if (v != null && vals.size < 60) vals.add(String(v)); });
+        [...vals].sort((a, b) => a.localeCompare(b, 'es')).forEach((v) => dl.append(el('option', { value: v })));
+      };
+      fillVals();
+      const ch = () => { r.field = fSel.value; r.op = oSel.value; r.value = vIn.value; app.styleChanged(ls); };
+      fSel.addEventListener('change', () => { ch(); fillVals(); });
+      oSel.addEventListener('change', ch);
+      vIn.addEventListener('change', ch);
+      rules.append(el('div', { class: 'flt-rule' }, fSel, oSel, vIn, dl, el('button', { type: 'button', class: 'icon ghost', 'aria-label': 'Quitar condición', onclick: () => { ls.params.filter.splice(i, 1); app.styleChanged(ls); paintRules(); } }, '×')));
+    });
+  };
+  paintRules();
+  box.append(details('Mostrar solo algunos objetos', ls.params.filter.length > 0,
+    fields.length ? null : el('p', { class: 'note' }, 'Los campos aparecen cuando la capa termina de cargar.'),
+    rules,
+    ls.params.filter.length > 1 ? field('Combinar condiciones', select(ls.params, 'filterMode', [['all', 'Que se cumplan todas'], ['any', 'Que se cumpla alguna']], { onChange: () => { app.styleChanged(ls); } })) : null,
+    fields.length ? el('div', { class: 'btn-row' }, button('Agregar condición', () => { ls.params.filter.push({ field: fields[0], op: '=', value: '' }); paintRules(); app.renderLeft(); }, { kind: 'small' })) : null));
+  // descarga
+  box.append(el('div', { class: 'btn-row' }, button('Descargar GeoJSON (lo cargado)', () => {
+    const feats = s && s.getFeatures ? s.getFeatures() : [];
+    if (!feats.length) { app.toast('Todavía no hay objetos cargados en la vista.'); return; }
+    const fmt = new GeoJSONFormat();
+    const obj = fmt.writeFeaturesObject(feats, { featureProjection: app.mainCtx.projection, dataProjection: 'EPSG:4326', decimals: 7 });
+    obj.features.forEach((f) => { delete f.properties.geometry; });
+    downloadBlob(new Blob([JSON.stringify(obj)], { type: 'application/geo+json' }), `${(ls.name || 'capa').replace(/[^\wáéíóúñ-]+/gi, '-').slice(0, 50)}.geojson`);
+  }, { kind: 'small ghost' })));
+  return box;
 }
 
 function demEditor(app, ls) {

@@ -2,7 +2,7 @@
 import { el, clear } from '../util.js';
 import { field, inlineFields, num, color, select, check, range, button, details, text } from './forms.js';
 import { SHAPES, DASH_OPTIONS, PATTERNS, DECOS } from '../styles.js';
-import { FONTS, getDef } from '../catalog.js';
+import { FONTS, getDef, defOf } from '../catalog.js';
 import { PALETTES, paletteColors } from '../palette.js';
 
 export function geomOf(ls) {
@@ -11,13 +11,13 @@ export function geomOf(ls) {
     const t = f ? f.geometry.type : 'Point';
     return /Point/.test(t) ? 'point' : /Line/.test(t) ? 'line' : 'polygon';
   }
-  const d = getDef(ls.def);
+  const d = defOf(ls);
   return d ? d.geom : null;
 }
 
 export function fieldsOf(app, ls) {
-  const d = getDef(ls.def);
-  if (d && d.fields) return d.fields;
+  const d = defOf(ls);
+  if (d && d.fields && d.fields.length) return d.fields;
   const feats = sampleFeatures(app, ls);
   const keys = new Set();
   feats.slice(0, 50).forEach((f) => Object.keys(f.getProperties()).forEach((k) => k !== 'geometry' && keys.add(k)));

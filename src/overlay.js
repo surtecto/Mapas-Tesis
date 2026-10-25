@@ -6,7 +6,7 @@ import { PT_MM, rgba, convexHull, segmentPolygonT, polygonCentroid, niceLength, 
 import { drawSymbol, dashArray, dashCap, fontString, getPattern, drawDecoratedLine } from './styles.js';
 import { CERTAINTY } from './state.js';
 import { lonLatTo, toLonLatFrom } from './projections.js';
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 import { siteSymbolCfg } from './layers.js';
 
 export const ACCENT = '#e8501c';
@@ -568,7 +568,7 @@ export function legendItems(state) {
     const ls = state.layers[i];
     if (ls.def === 'interp') { if (ls.visible && ls.legend && ls.legend.show !== false) interpLegendItems(state, ls, items); continue; }
     if (!ls.visible || !ls.legend || !ls.legend.show || !ls.style) continue;
-    const def = ls.def === 'user' ? { geom: userGeomType(ls) } : getDef(ls.def);
+    const def = ls.def === 'user' ? { geom: userGeomType(ls) } : defOf(ls);
     if (!def || !def.geom) continue;
     const st = ls.style;
     const cz = st.categorize || {};

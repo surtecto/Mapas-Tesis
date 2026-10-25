@@ -1,6 +1,6 @@
 // Destinos de la figura: tamaños, resoluciones y mínimos de legibilidad según dónde se va a ver.
 // Impresión (mm, puntos tipográficos, ppp), proyector y videollamada (píxeles, compresión), web (píxeles, pantallas densas).
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 import { contrastRatio } from './util.js';
 import { grayDiagnostics } from './palette.js';
 import { legendItems } from './overlay.js';
@@ -107,7 +107,7 @@ function collect(state) {
   }
   for (const ls of state.layers) {
     if (!ls.visible || !ls.style) continue;
-    const def = ls.def === 'user' ? { kind: 'vector' } : getDef(ls.def);
+    const def = ls.def === 'user' ? { kind: 'vector' } : defOf(ls);
     if (!def) continue;
     const st = ls.style;
     if (def.type === 'graticule') {

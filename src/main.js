@@ -22,7 +22,7 @@ import { setupSearch } from './ui/search.js';
 import { simulationFilter } from './media.js';
 import { getImage, exportImages, importImages } from './imagestore.js';
 import { activeVersion, isLocked, addFeature, removeFeature, interpLayer, ensureInterpLayer, bumpInterp } from './interp.js';
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 import { renderLayersPanel } from './ui/layersPanel.js';
 import { renderSitesPanel } from './ui/sitesPanel.js';
 import { renderFigurePanel } from './ui/figurePanel.js';
@@ -322,7 +322,7 @@ class App {
       state = t.build();
     } else {
       const s = JSON.parse(serializeState(this.state));
-      s.layers = s.layers.filter((l) => l.def === 'graticule' || (getDef(l.def) && getDef(l.def).kind === 'raster') || l.def === 'ign-departamentos' || l.def === 'ign-localidades');
+      s.layers = s.layers.filter((l) => l.def === 'graticule' || (defOf(l) && defOf(l).kind === 'raster') || l.def === 'ign-departamentos' || l.def === 'ign-localidades');
       s.sites = []; s.texts = []; s.insets = s.insets.filter((z) => z.mode === 'context');
       s.interp = normalizeState({}).interp;
       s.caption = { ...s.caption, figure: opt.name, lead: '' };

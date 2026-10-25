@@ -1,6 +1,6 @@
 // Estilos de tesis: lenguajes gráficos completos (papel, tinta, tipografía, aguas, límites, grilla, leyenda)
 // que se aplican de una vez a toda la figura según la «semántica» de cada capa del catálogo.
-import { getDef } from './catalog.js';
+import { getDef, defOf } from './catalog.js';
 import { getPalette, paletteColors } from './palette.js';
 import { mergeDeep } from './state.js';
 import { hexToRgb, rgbToHex } from './util.js';
@@ -188,7 +188,7 @@ export function applyTheme(state, theme, { recolorCategories = true, recolorRang
   const patches = semPatches(t);
   let n = 0;
   for (const ls of state.layers) {
-    const def = ls.def === 'user' ? null : getDef(ls.def);
+    const def = ls.def === 'user' ? null : defOf(ls);
     if (!def) continue;
     if (def.type === 'graticule') {
       Object.assign(ls.style.line, { color: t.grat.color, width: t.grat.width, dash: t.grat.dash, opacity: t.grat.opacity });

@@ -11,14 +11,15 @@ import TileGrid from 'ol/tilegrid/TileGrid.js';
 import { createXYZ, extentFromProjection } from 'ol/tilegrid.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
 import EsriJSON from 'ol/format/EsriJSON.js';
-import { bbox as bboxStrategy } from 'ol/loadingstrategy.js';
+import { bbox as bboxStrategy, all as allStrategy } from 'ol/loadingstrategy.js';
 import { transformExtent, addProjection, addCoordinateTransforms, get as getProjectionOl } from 'ol/proj.js';
 import Projection from 'ol/proj/Projection.js';
 import ImageStatic from 'ol/source/ImageStatic.js';
 import Feature from 'ol/Feature.js';
 import { Style, Stroke, Fill, Text } from 'ol/style.js';
 import { getRenderPixel } from 'ol/render.js';
-import { getDef, RAMPS } from './catalog.js';
+import { getDef, defOf, RAMPS } from './catalog.js';
+import { swapCoords } from './services.js';
 import { EMBEDDED } from './embedded.js';
 import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
 import { hexToRgb, rgba, PT_MM } from './util.js';
@@ -152,8 +153,9 @@ function getRasterSource(ls, def, mctx) {
     const key = cacheKey(ls, `wms|${reqProj}`);
     if (!rasterSources.has(key)) {
       rasterSources.set(key, new TileWMS({
-        url: def.url, params: { LAYERS: def.layers, FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.3.0', STYLES: '' },
-        projection: reqProj, crossOrigin: 'anonymous', attributions: def.attribution, tileGrid: undefined, transition: 0, gutter: 0,
+        url: def.url, params: { LAYERS: def.layers, FORMAT: 'image/png', TRANSPARENT: true, VERSION: '1.3.0', STYLES: def.styles || '' },
+        // los servidores sin CORS se pueden ver, pero no leer: esas capas quedan fuera de la exportación
+        projection: reqProj, crossOrigin: def.noCors ? undefined : 'anonymous', attributions: def.attribution, tileGrid: undefined, transition: 0, gutter: 0,
       }));
     }
     return rasterSources.get(key);
@@ -415,6 +417,115 @@ function buildWfsViewSource(ls, def, mctx) {
   return src;
 }
 
+// ---------- capas de servicios oficiales (WFS genérico y ArcGIS REST) ----------
+const svcWholeCache = new Map(); // descarga completa compartida entre el mapa, los recuadros y la exportación
+
+async function getJSONStrict(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const t = await r.text();
+  let j;
+  try { j = JSON.parse(t); } catch (e) { throw new Error(t.trim().startsWith('<') ? (t.match(/<ows:ExceptionText>([^<]+)/) || t.match(/<ServiceException[^>]*>([^<]+)/) || [0, 'el servidor respondió con un error'])[1].trim().slice(0, 160) : 'respuesta ilegible'); }
+  if (j && j.error) throw new Error(j.error.message || 'error del servidor');
+  return j;
+}
+
+function wfsGetFeatureUrl(def, ll, limit) {
+  const p = new URLSearchParams({
+    service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: def.typeName, outputFormat: def.outputFormat || 'application/json',
+    srsName: 'EPSG:4326', maxFeatures: String(limit),
+  });
+  const b = ll && (def.swap ? [ll[1], ll[0], ll[3], ll[2]] : ll);
+  if (def.cql) {
+    // GeoServer no admite bbox y filtro juntos: la caja va dentro del filtro
+    p.set('CQL_FILTER', b && def.geomName ? `(${def.cql}) AND BBOX(${def.geomName},${b.map((v) => v.toFixed(5)).join(',')})` : def.cql);
+  } else if (b) p.set('bbox', `${b.map((v) => v.toFixed(5)).join(',')},EPSG:4326`);
+  return `${def.url}?${p}`;
+}
+
+async function fetchWfsFeatures(def, ll, projCode) {
+  const limit = ll ? 6000 : 25000;
+  const obj = await getJSONStrict(wfsGetFeatureUrl(def, ll, limit));
+  if (def.swap) (obj.features || []).forEach((f) => { if (f.geometry && f.geometry.coordinates) f.geometry.coordinates = swapCoords(f.geometry.coordinates); });
+  const feats = readFeatures(obj, projCode);
+  feats._truncated = (obj.features || []).length >= limit;
+  return feats;
+}
+
+async function fetchArcgisFeatures(def, ll, projCode, mPerPx) {
+  const base = { where: def.where || '1=1', outFields: '*', outSR: '4326', returnGeometry: 'true', f: def.geojson ? 'geojson' : 'json' };
+  if (ll) Object.assign(base, { geometry: ll.map((v) => v.toFixed(6)).join(','), geometryType: 'esriGeometryEnvelope', inSR: '4326', spatialRel: 'esriSpatialRelIntersects' });
+  if (mPerPx && def.geom !== 'point') base.maxAllowableOffset = String(Math.max(1e-6, (mPerPx * 0.5) / 111000));
+  const read = (j) => (def.geojson ? readFeatures(j, projCode) : esrijson.readFeatures(j, { dataProjection: 'EPSG:4326', featureProjection: projCode }));
+  let all = [];
+  let truncated = false;
+  if (!def.paginate) {
+    // sin paginación no se puede mandar resultOffset: se pide una vez y se avisa si quedó corto
+    const j = await getJSONStrict(`${def.url}/query?${new URLSearchParams(base)}`);
+    all = read(j);
+    truncated = !!(j.exceededTransferLimit || (j.properties && j.properties.exceededTransferLimit));
+  } else {
+    const n = def.maxRec || 1000;
+    for (let page = 0; page < 25; page++) {
+      const j = await getJSONStrict(`${def.url}/query?${new URLSearchParams({ ...base, resultOffset: String(page * n), resultRecordCount: String(n) })}`);
+      const f = read(j);
+      all = all.concat(f);
+      const more = j.exceededTransferLimit || (j.properties && j.properties.exceededTransferLimit);
+      if (!more || !f.length) break;
+      if (page === 24) truncated = true;
+    }
+  }
+  all._truncated = truncated;
+  return all;
+}
+
+function buildServiceVectorSource(ls, def, mctx) {
+  const whole = !!def.whole;
+  const src = new VectorSource({
+    wrapX: false,
+    strategy: whole ? allStrategy : bboxStrategy,
+    loader(extent, resolution, projection, success, failure) {
+      const center = mctx.map ? mctx.map.getView().getCenter() : [0, 0];
+      let mpm = resolution;
+      let mPerPx = resolution;
+      try { const mu = metersPerUnit(mctx.projection, center); mpm = resolution * mu * mctx.pxPerMm; mPerPx = (resolution * mu) / (mctx.pixelRatio || 1); } catch (e) { /* noop */ }
+      let ll = null;
+      if (!whole) {
+        const cur = mctx.getLayerState(ls.uid) || ls;
+        const limit = (def.maxMpm || 2500) * (cur.params && cur.params.force ? 8 : 1);
+        if (mpm > limit) { src._tooFar = true; src.dispatchEvent('cm-far'); failure(); return; }
+        src._tooFar = false;
+        try { ll = transformExtent(extent, projection, 'EPSG:4326', 16); } catch (e) { failure(); return; }
+        ll = [Math.max(-180, ll[0]), Math.max(-90, ll[1]), Math.min(180, ll[2]), Math.min(90, ll[3])];
+        if (!(ll[2] > ll[0] && ll[3] > ll[1])) { success([]); return; }
+      }
+      src._pend = (src._pend || 0) + 1;
+      src._loading = true;
+      let job;
+      if (whole) {
+        const key = `${def.type}|${def.url}|${def.typeName || ''}|${def.cql || def.where || ''}|${mctx.projection}`;
+        if (!svcWholeCache.has(key)) {
+          const pr = def.type === 'svc-wfs' ? fetchWfsFeatures(def, null, mctx.projection) : fetchArcgisFeatures(def, null, mctx.projection, null);
+          pr.catch(() => svcWholeCache.delete(key));
+          svcWholeCache.set(key, pr);
+        }
+        job = svcWholeCache.get(key).then((feats) => { const c = feats.map((f) => f.clone()); c._truncated = feats._truncated; return c; });
+      } else {
+        job = def.type === 'svc-wfs' ? fetchWfsFeatures(def, ll, mctx.projection) : fetchArcgisFeatures(def, ll, mctx.projection, mPerPx);
+      }
+      job.then((feats) => {
+        src.addFeatures(feats);
+        src._truncated = !!feats._truncated;
+        success(feats);
+      }).catch((err) => {
+        if (mctx.onLayerError) mctx.onLayerError(ls, err);
+        failure();
+      }).finally(() => { src._pend -= 1; src._loading = src._pend > 0; });
+    },
+  });
+  return src;
+}
+
 // ---------- planos georreferenciados ----------
 const georefRegistered = new Set();
 export function georefModel(state, sourceId) {
@@ -658,7 +769,7 @@ function attachClip(layer, ls, mctx) {
 
 // ---------- fábrica principal ----------
 export function buildOlLayer(ls, mctx) {
-  const def = ls.def === 'user' ? { kind: 'vector', type: 'user' } : getDef(ls.def);
+  const def = ls.def === 'user' ? { kind: 'vector', type: 'user' } : defOf(ls);
   if (!def) return null;
   let layer = null;
   const getLs = () => mctx.getLayerState(ls.uid);
@@ -670,6 +781,10 @@ export function buildOlLayer(ls, mctx) {
     layer = buildGeorefLayer(ls, mctx, className);
   } else if (def.type === 'interp') {
     layer = buildInterpLayer(ls, mctx, className);
+  } else if (def.type === 'svc-wfs' || def.type === 'svc-arcgis') {
+    const src = buildServiceVectorSource(ls, def, mctx);
+    layer = new VectorLayer({ source: src, style: makeVectorStyleFn(getLs, def, mctx), declutter: decl, className });
+    layer._viewSource = src;
   } else if (def.type === 'wfs-view') {
     const src = buildWfsViewSource(ls, def, mctx);
     layer = new VectorLayer({ source: src, style: makeVectorStyleFn(getLs, def, mctx), declutter: decl, className });
