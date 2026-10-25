@@ -1,12 +1,40 @@
 # Mapas-Tesis
 
-Generador web de **mapas para tesis e investigación**. Lee el tema de la tesis y la geografía del lugar, propone un lenguaje gráfico (estilo, proyección, capas), prepara la figura según dónde se va a ver (impresión, proyector, videollamada o web) y permite construir **mapas de interpretación** sobre planos históricos o realizados por otros, con versiones comparables y método documentado.
+Generador web de **mapas para tesis e investigación**. Cada computadora guarda su propia **biblioteca de proyectos** (uno o varios mapas por proyecto); un proyecto nuevo empieza por sus datos fundamentales y por el lugar, ubicado **sobre la imagen satelital o en una hoja en blanco**. Las capas oficiales (IGN, INA, INDEC, INTA, Ambiente, ARBA, Estadística bonaerense y todo el catálogo de IDERA) se cargan **como vectores que se pueden restilizar, filtrar y exportar**; las imágenes satelitales se consultan **por fecha** (Sentinel-2 y Landsat desde 1972) junto con la **cobertura del suelo 2017–2025**, sus superficies y sus cambios. La pestaña Análisis suma clases, densidades, áreas de influencia, patrones de puntos, mediciones y **perfiles topográficos**. Todo se compone en milímetros de papel para el destino de la figura (impresión, proyector, videollamada o web) y convive con los **mapas de interpretación** sobre planos históricos.
 
 Deriva de [Coni-Mapas](https://github.com/surtecto/Coni-Mapas) y conserva todas sus funciones (capas del IGN, relieve, imágenes satelitales, zooms en lupa, paletas tomadas de gráficos, exportación para revistas).
 
 **Usar en línea:** https://surtecto.github.io/Mapas-Tesis/
 
-**Usar en la computadora:** abrir `index.html` con Chrome, Edge o Firefox. Las capas se descargan de sus servidores, así que hace falta conexión. El proyecto se guarda solo en el navegador y también se puede descargar como archivo `.tesis.json`, que incluye las imágenes de los planos.
+**Usar en la computadora:** abrir `index.html` con Chrome, Edge o Firefox. Las capas se descargan de sus servidores, así que hace falta conexión. Los proyectos se guardan en el navegador de cada computadora (dos computadoras nunca se pisan); para llevar un proyecto a otra, se exporta como `.tesis.json` (con todos sus mapas y planos) y se importa allá.
+
+## Inicio y proyectos
+- **Planoteca de la computadora:** cada proyecto es una lámina con su vista previa y su rótulo (tipo de trabajo, cantidad de mapas, autoría, últimos cambios). Abrir, duplicar, exportar o eliminar (con confirmación); importar proyectos o mapas sueltos de versiones anteriores; pedido al navegador para que no borre los datos.
+- **Proyecto nuevo en tres pasos:** 1) datos fundamentales (nombre, tipo de trabajo, título, autoría, institución, dirección, año, palabras clave, resumen, período, licencia de las figuras); 2) el lugar, sobre imagen satelital u hoja en blanco: buscar, **elegir un partido del IGN tocando el mapa**, marcar un punto, dibujar un rectángulo o un polígono; 3) el primer mapa: destino, estilo propuesto por el tema, proyección (automática según el área), capas de partida y mapa de ubicación.
+- **Varios mapas por proyecto:** nuevo mapa desde el área del proyecto, con la misma vista y estilo (para series comparables), copia del actual o desde un modelo; renombrar, duplicar, eliminar y **volver a como estaba al abrirlo** (resguardo automático).
+- Guardado continuo por mapa, aviso si el mismo mapa está abierto en otra pestaña, y epígrafe con **autoría y licencia** del proyecto.
+
+## Servicios oficiales
+- **Destacados verificados:** IGN (y gestión del riesgo), INA, INDEC (radios y fracciones censales), INTA (nacional y regionales), Ambiente, Transporte, SENASA, CONAE, SHN, Energía, Mapa Educativo, Forestal, **ARBA en WFS** (parcelas, manzanas, quintas, chacras…), **Estadística de la Provincia de Buenos Aires** (servidor ArcGIS con carpetas: censo 2022 por partido), Mapa escolar, GeoInfra, OPISU, Estadística CABA e IDECOR.
+- **Catálogo completo de IDERA** leído en vivo (167 organismos), con filtros por nivel y jurisdicción; búsqueda de una capa **en todos los destacados** a la vez.
+- **WFS y ArcGIS como vectores editables:** se cargan según la vista o completas, con filtro en el servidor (CQL o SQL) y filtro por atributos en el navegador; estilo, rótulos, clasificación, leyenda, cita en el epígrafe y descarga en GeoJSON.
+- **WMS como imagen** con los estilos del servidor y su leyenda. Los servidores sin CORS (por ejemplo, SEGEMAR) se pueden ver pero quedan fuera de la exportación, con aviso.
+- La verificación de cada servicio está en [`docs/servicios-verificados.md`](docs/servicios-verificados.md).
+
+## Imágenes y coberturas
+- **Imagen por fecha:** Sentinel-2 (10 m, último año) y **Landsat desde 1972** (MSS, TM, ETM+, OLI): búsqueda de fechas en la vista con nubosidad máxima, rango y estación; representaciones de color natural, agricultura, infrarrojo, SWIR, NDVI, NDMI, NBR, NDBI o temperatura de superficie. Opción de completar los huecos con las fechas cercanas.
+- **Comparar fechas con cortina:** la capa de arriba se ve solo a un lado de una línea; rótulos con las fechas y línea divisoria que también salen en la exportación.
+- **Mosaicos anuales sin nubes** (EOX, 2016–2024).
+- **Cobertura del suelo 10 m 2017–2025** con paleta propia (aplicada en el servidor), clases que se ocultan o recolorean, **superficie por clase en la vista**, **matriz de cambios** entre dos años y **mapa de cambios** (CSV descargable).
+- **Clasificación propia** no supervisada (k-means) de la vista sobre seis bandas de reflectancia, NDVI y NDWI, con nombres sugeridos, superficies y NDVI medio por clase, renombrable y recoloreable.
+
+## Análisis
+- **Clasificar una capa** por un campo numérico: cortes naturales (Jenks), cuantiles, intervalos iguales o desvío estándar, con rampas secuenciales; para puntos, **símbolos proporcionales** (área proporcional al valor) con leyenda de tamaños reales.
+- **Áreas de influencia** a varias distancias, **densidad** por hexágonos o por núcleo (bandas), **polígonos de Thiessen**, **conteo de puntos en polígonos** con densidad por km².
+- **Patrón de puntos:** índice de vecino más próximo de Clark y Evans (con puntaje z) y **centro medio con elipse de desvío estándar**.
+- **Medición geodésica** de distancias y superficies.
+- **Perfil topográfico:** se dibuja el corte sobre el mapa y el perfil se agrega a la figura como elemento propio, con la **exageración vertical calculada y rotulada**.
+- **Llamadas:** textos con línea de referencia a un punto del mapa.
 
 ## Pestañas
 
@@ -24,7 +52,7 @@ Deriva de [Coni-Mapas](https://github.com/surtecto/Coni-Mapas) y conserva todas 
 - **Planos fuente:** imágenes JPG, PNG o WebP (escaneos o fotografías tomadas en el archivo) con sus datos para citar: autor, año, archivo, signatura, enlace y notas.
 - **Georreferenciador:** el plano y el terreno lado a lado; puntos de control tocando ambos, escribiendo latitud y longitud o coordenadas **POSGAR 2007** o **Campo Inchauspe** (Gauss-Krüger, para cartas antiguas). Imanta a los vértices de las mensuras del Atlas. Transformaciones: Helmert, afín, **proyectiva** (para fotos de planos tomadas en ángulo), polinomial de 2.º y 3.er orden y **lámina delgada**. Muestra residuos en metros, error medio cuadrático o validación cruzada, y los vectores de error sobre el plano.
 - **Sobre el mapa:** opacidad, fusión, quitar el papel (deja solo la tinta), teñir, grises y recorte de márgenes.
-- **Dibujo con grados de certeza:** cada trazo tiene categoría (camino, deslinde, curso de agua, frontera, suerte, bañado, población, posta, toldería, hito…) y certeza: **documentada** (trazo lleno), **inferida** (guiones) o **conjetural** (puntos). Cada elemento guarda nombre, período, fuente y nota.
+- **Dibujo con grados de certeza:** cada trazo tiene categoría (camino, deslinde, curso de agua, frontera, suerte, bañado, población, posta, toldería, hito, **flujo o recorrido**, **zona de transición o borde incierto**, **lugar percibido o nombrado**…) y certeza: **documentada** (trazo lleno), **inferida** (guiones) o **conjetural** (puntos). Cada elemento guarda nombre, período, fuente y nota.
 - **Versiones:** cada versión guarda su propia georreferenciación y sus trazos. Se pueden duplicar, fijar como registro, comparar (la otra versión se ve en gris) y exportar en GeoJSON. La **ficha metodológica** reúne fuentes, puntos de control, errores y criterios para el capítulo de métodos.
 
 ### Capas
@@ -50,7 +78,12 @@ POSGAR 2007 fajas 1 a 7 (marco oficial argentino), Campo Inchauspe fajas 4 a 6 (
 | Fuente | Servicio | Cita |
 |---|---|---|
 | Instituto Geográfico Nacional (IGN) | WMS/WFS `wms.ign.gob.ar` y teselas Argenmap | «Instituto Geográfico Nacional de la República Argentina» |
-| ARBA (Provincia de Buenos Aires) | WMS `geo.arba.gov.ar` | Catastro territorial, IDERA |
+| ARBA (Provincia de Buenos Aires) | WMS y WFS `geo.arba.gov.ar` | Catastro territorial, IDERA |
+| IDERA y organismos del catálogo (INA, INDEC, INTA, Ambiente, SEGEMAR, Estadística PBA…) | WFS, WMS y ArcGIS REST de cada organismo | cada capa agregada guarda su cita con la fecha de consulta |
+| Sentinel-2 (Copernicus, ESA) | Esri Sentinel-2 Views (`sentinel.arcgis.com`) | fecha y representación en el epígrafe |
+| Landsat (USGS, NASA) | Esri Landsat Multispectral (`landsat2.arcgis.com`) | fecha y representación en el epígrafe |
+| Cobertura del suelo 10 m | Impact Observatory, Microsoft y Esri | Karra et al. (2021) |
+| Sentinel-2 cloudless | EOX IT Services | por año, con datos Copernicus |
 | Atlas de Mensuras de Giles | Copia local de los datos publicados (`data/atlas_*.geojson`) | Addesso, J. P. (2026) |
 | Georef (Secretaría de Innovación) | API `apis.datos.gob.ar/georef` | Búsqueda de lugares |
 | OpenStreetMap / Nominatim | Búsqueda de lugares | © colaboradores de OpenStreetMap |
@@ -65,7 +98,10 @@ npm install
 npm run build     # genera assets/app.js, assets/app.css y assets/ol.css
 python3 -m http.server 8000
 ```
-El código está en `src/` (OpenLayers 10, proj4, fflate y shpjs, empaquetados con esbuild). Módulos nuevos respecto de Coni-Mapas: `interpret.js` (lectura del tema y del lugar), `themes.js` (estilos de tesis), `media.js` (destinos, legibilidad y simulación), `georef.js` (transformaciones y residuos), `interp.js` (fuentes, versiones y ficha metodológica), `imagestore.js` (imágenes en IndexedDB) y las pestañas en `src/ui/`. `node tests/georef.test.mjs` prueba las transformaciones contra una homografía conocida.
+El código está en `src/` (OpenLayers 10, proj4, fflate, shpjs, geotiff.js y módulos de Turf, empaquetados con esbuild). En la versión 3: `db.js` y `library.js` (proyectos y mapas en IndexedDB), `starter.js` (primer mapa de un proyecto), `services.js` (catálogos y capacidades de servicios), `imagery.js` (imágenes por fecha, coberturas, cambios y k-means), `analysis.js` (clases y geoprocesos) y las pantallas `ui/home.js`, `ui/servicesDialog.js`, `ui/imageryDialog.js`, `ui/analysisPanel.js` y `ui/dialogs.js`. Módulos nuevos respecto de Coni-Mapas: `interpret.js` (lectura del tema y del lugar), `themes.js` (estilos de tesis), `media.js` (destinos, legibilidad y simulación), `georef.js` (transformaciones y residuos), `interp.js` (fuentes, versiones y ficha metodológica), `imagestore.js` (imágenes en IndexedDB) y las pestañas en `src/ui/`. `node tests/georef.test.mjs` prueba las transformaciones contra una homografía conocida.
+
+## Próximo paso: participación
+La planoteca y las capas propias ya separan el mapa base de lo que se le suma. El paso siguiente es abrir un mapa publicado a **aportes situados** (señales, opiniones geolocalizadas, audios, fotos y videos, con una mirada situacionista y perceptual), que necesita un servidor compartido para recibir y moderar los aportes; el modelo de datos de las capas propias (GeoJSON con atributos libres y cita) es el punto de partida.
 
 ## Licencia
 Código bajo licencia MIT. Cada capa conserva la licencia y las condiciones de uso de su proveedor.

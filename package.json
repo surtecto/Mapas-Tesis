@@ -1,7 +1,7 @@
 {
   "name": "mapas-tesis",
-  "version": "2.0.0",
-  "description": "Generador de mapas para tesis: interpretación del tema y del lugar, destinos de la figura y mapas de interpretación sobre planos históricos",
+  "version": "3.0.0",
+  "description": "Generador de mapas para tesis: proyectos por computadora, servicios oficiales argentinos como vectores editables, imágenes satelitales en el tiempo, coberturas, análisis espacial, destinos de la figura y mapas de interpretación sobre planos históricos",
   "scripts": {
     "build": "node tools/build.mjs",
     "dev": "node tools/build.mjs --dev"

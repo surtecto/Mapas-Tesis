@@ -328,15 +328,15 @@ function profileTool(app, ui) {
         out.append(el('p', {}, `${prof.total.toLocaleString('es-AR', { maximumFractionDigits: 1 })} km; cotas entre ${Math.round(zmin)} y ${Math.round(zmax)} m (desnivel ${Math.round(zmax - zmin)} m).`));
         const st = app.state;
         const f = app.frameSize();
-        const w = Math.min(110, f.w * 0.62), h = Math.max(28, w * 0.36);
+        const w = Math.round(Math.min(110, f.w * 0.62)), h = Math.round(Math.max(28, w * 0.36));
         const chart = {
-          id: uid('G'), kind: 'profile', x: f.x + f.w - w - 3, y: f.y + f.h - h - 3, w, h, title: o.title, labelA: 'A', labelB: 'B',
+          id: uid('G'), kind: 'profile', x: Math.round((f.x + f.w - w - 3) * 10) / 10, y: Math.round((f.y + f.h - h - 3) * 10) / 10, w, h, title: o.title, labelA: 'A', labelB: 'B',
           data: prof.points.map((p) => [Number(p[0].toFixed(3)), Number(p[1].toFixed(1))]), line: '#5b3a1e', fill: '#c9b48f', size: 6, font: st.legend.font || 'Source Sans 3', bg: true,
           source: 'Modelo de elevación Terrarium (Mapzen/AWS, a partir de SRTM y otros)', coords: g.coordinates,
         };
         st.charts.push(chart);
         if (o.layer) {
-          const ln = { type: 'Feature', properties: { nombre: o.title }, geometry: g };
+          const ln = { type: 'Feature', properties: { nombre: '', titulo: o.title }, geometry: g };
           const ends = [g.coordinates[0], g.coordinates[g.coordinates.length - 1]].map((c, i) => ({ type: 'Feature', properties: { nombre: i ? 'B' : 'A' }, geometry: { type: 'Point', coordinates: c } }));
           addResultLayer(app, `Corte ${o.title}`, { type: 'FeatureCollection', features: [ln, ...ends] },
             { line: { color: '#5b3a1e', width: 0.9, dash: 'solid' }, point: { shape: 'circle', size: 3.5, fill: '#5b3a1e', stroke: '#ffffff', strokeWidth: 0.5 }, label: { show: true, field: 'nombre', size: 7, bold: true, offsetY: -5 } },
