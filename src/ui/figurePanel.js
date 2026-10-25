@@ -211,10 +211,11 @@ function captionEditor(app) {
   const refresh = () => { out.value = buildCaption(st); };
   refresh();
   if (st.caption.withSites === undefined) st.caption.withSites = true;
+  if (st.caption.withAuthor === undefined) st.caption.withAuthor = true;
   return el('div', {},
     field('Rótulo de la figura', text(st.caption, 'figure', { onChange: refresh })),
     field('Descripción', text(st.caption, 'lead', { multiline: true, rows: 3, onChange: refresh })),
-    el('div', { class: 'check-row' }, check(st.caption, 'withSites', 'Incluir coordenadas de los sitios', { onChange: refresh }), check(st.caption, 'withNotes', 'Incluir notas de los sitios', { onChange: refresh })),
+    el('div', { class: 'check-row' }, check(st.caption, 'withSites', 'Incluir coordenadas de los sitios', { onChange: refresh }), check(st.caption, 'withNotes', 'Incluir notas de los sitios', { onChange: refresh }), check(st.caption, 'withAuthor', 'Incluir autoría y licencia del proyecto', { onChange: refresh })),
     field('Epígrafe generado (proyección, datum y fuentes de las capas visibles)', out),
     el('div', { class: 'btn-row' }, button('Copiar epígrafe', async () => {
       try { await navigator.clipboard.writeText(out.value); app.toast('Epígrafe copiado.'); } catch (e) { out.select(); app.toast('Seleccioné el texto: copialo con Ctrl+C.'); }
@@ -225,8 +226,8 @@ function captionEditor(app) {
 function templatesEditor(app) {
   const box = el('div', { class: 'templates' });
   for (const t of TEMPLATES) {
-    box.append(el('div', { class: 'tpl' }, el('span', {}, t.name), button('Usar', () => app.loadTemplate(t.id), { kind: 'small' })));
+    box.append(el('div', { class: 'tpl' }, el('span', {}, t.name), button('Nuevo mapa', () => app.loadTemplate(t.id), { kind: 'small' })));
   }
-  box.append(el('p', { class: 'hint' }, 'Usar una plantilla reemplaza el proyecto actual (podés deshacer con Ctrl+Z).'));
+  box.append(el('p', { class: 'hint' }, 'Cada modelo se agrega como un mapa nuevo del proyecto: el mapa abierto no se toca.'));
   return box;
 }

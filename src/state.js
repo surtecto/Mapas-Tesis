@@ -159,6 +159,7 @@ export function emptyState() {
     north: defaultNorth(),
     scalebar: defaultScalebar(),
     caption: { figure: 'Figura 1', lead: 'Mapa de localización del área de estudio.' },
+    credits: { author: '', year: '', institution: '', license: '' },
   };
 }
 

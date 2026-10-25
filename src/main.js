@@ -7,8 +7,15 @@ import { transformExtent } from 'ol/proj.js';
 import { MapCtx } from './mapctx.js';
 import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom } from './projections.js';
 import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, insetOutline, textPosition } from './overlay.js';
-import { History, normalizeState, saveLocal, loadLocal, serializeState } from './state.js';
-import { TEMPLATES, templateGiles } from './templates.js';
+import { History, normalizeState, loadLocal, serializeState } from './state.js';
+import { TEMPLATES } from './templates.js';
+import {
+  getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject,
+  exportProject, importProject, migrateLegacy, defaultMeta,
+} from './library.js';
+import { buildFirstMap } from './starter.js';
+import { renderHome, renderWizard, metaFields } from './ui/home.js';
+import { confirmDialog, formDialog, promptDialog } from './ui/dialogs.js';
 import { renderThesisPanel } from './ui/thesisPanel.js';
 import { renderInterpPanel } from './ui/interpPanel.js';
 import { setupSearch } from './ui/search.js';
@@ -39,15 +46,345 @@ class App {
     this.history = new History();
     this.redraw = rafThrottle(() => this.drawPreviewOverlay());
     this.scheduleHistory = debounce(() => this.history.push(serializeState(this.state)), 350);
-    this.scheduleSave = debounce(() => saveLocal(JSON.parse(serializeState(this.state))), 800);
+    this.scheduleSave = debounce(() => this.saveCurrent(), 800);
+    this.scheduleThumb = debounce(() => this.saveCurrent({ thumb: true }), 6000);
+    this.current = null; // { projectId, mapId, project, maps }
+    this.editorReady = false;
+    this.tabId = uid('tab');
     this.updateStatusSoon = debounce(() => this.updateStatus(), 120);
     this.renderLeftSoon = debounce(() => this.renderLeft(), 300);
   }
 
-  init() {
+  // ---------- arranque: biblioteca de proyectos y rutas ----------
+  async boot() {
     registerProjections();
-    const saved = loadLocal();
-    try { this.state = normalizeState(saved || templateGiles()); } catch (e) { console.error(e); this.state = normalizeState(templateGiles()); }
+    this.$ = { toast: document.getElementById('toast') };
+    window.mapasTesis = this;
+    window.coniApp = this;
+    try {
+      const legacy = loadLocal();
+      if (legacy) {
+        const r = await migrateLegacy(legacy);
+        if (r) setTimeout(() => this.toast(`El mapa que tenías abierto en la versión anterior quedó guardado como proyecto: «${r.project.meta.name}».`), 600);
+      }
+    } catch (e) { /* noop */ }
+    this.setupChannel();
+    window.addEventListener('hashchange', () => this.route());
+    window.addEventListener('beforeunload', () => { if (this.current && this.state) this.saveCurrent({ sync: true }); });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && this.current) this.saveCurrent({ thumb: true }); });
+    await this.route();
+  }
+
+  async route() {
+    const h = location.hash || '#/';
+    const m = h.match(/^#\/p\/([^/]+)(?:\/([^/]+))?/);
+    if (m) {
+      if (this.current && this.current.projectId === m[1] && (!m[2] || this.current.mapId === m[2]) && !document.body.classList.contains('on-home')) return;
+      await this.openProject(m[1], m[2]);
+    } else if (/^#\/nuevo/.test(h)) {
+      await this.leaveEditor();
+      renderWizard(this);
+    } else {
+      await this.leaveEditor();
+      renderHome(this);
+    }
+  }
+
+  setHash(h) { if (location.hash !== h) history.replaceState(null, '', h); }
+  goHome() { if (location.hash === '#/' || location.hash === '') this.route(); else location.hash = '#/'; }
+  newProject() { location.hash = '#/nuevo'; }
+
+  async leaveEditor() {
+    if (this.current && this.state) { this.stopDraw && this.editorReady && this.stopDraw(true); await this.saveCurrent({ thumb: true }); }
+    this.current = null;
+    document.title = 'Mapas-Tesis';
+  }
+
+  showEditor() {
+    document.body.classList.remove('on-home');
+    const home = document.getElementById('home');
+    home.hidden = true;
+    clear(home);
+    document.getElementById('app').hidden = false;
+  }
+
+  async openProject(projectId, mapId) {
+    let p;
+    try { p = await getProject(projectId); } catch (e) { p = null; }
+    if (!p) { this.toast('Ese proyecto no está en esta computadora.', 'warn'); this.setHash('#/'); renderHome(this); return; }
+    let maps = await listMaps(projectId);
+    if (!maps.length) {
+      const st = buildFirstMap(p.meta, p.meta.area, { start: 'blank', mediaId: p.meta.mediaId, themeId: p.meta.themeId, mapName: 'Mapa 1' });
+      await createMap(projectId, 'Mapa 1', st);
+      maps = await listMaps(projectId);
+      p = await getProject(projectId);
+    }
+    const m = maps.find((x) => x.id === mapId) || maps.find((x) => x.id === p.activeMapId) || maps[0];
+    if (this.current && this.current.mapId !== m.id) await this.saveCurrent({ thumb: true });
+    let state;
+    try { state = normalizeState(m.state); } catch (err) { console.error(err); this.toast(`El mapa «${m.name}» está dañado: ${err.message}`, 'error'); state = normalizeState(buildFirstMap(p.meta, p.meta.area, { start: 'blank' })); }
+    state.title = m.name || state.title;
+    this.fillFromMeta(state, p.meta);
+    this.current = { projectId, mapId: m.id, project: p, maps: maps.map((x) => ({ id: x.id, name: x.name, updated: x.updated, thumb: x.thumb })) };
+    this.showEditor();
+    this.state = state;
+    this.history = new History();
+    if (!this.editorReady) this.initEditor();
+    else this.applyState();
+    this.history.push(serializeState(this.state));
+    this.preloadImages();
+    this.renderProjectBar();
+    this.setHash(`#/p/${projectId}/${m.id}`);
+    document.title = `${m.name} · ${p.meta.name} · Mapas-Tesis`;
+    if (p.activeMapId !== m.id) touchProject(projectId, { activeMapId: m.id }).catch(() => {});
+    this.announceOpen();
+    if (!m.thumb) this.scheduleThumb();
+  }
+
+  // Los datos del proyecto completan lo que el mapa no tenga propio (tema, autoría)
+  fillFromMeta(state, meta) {
+    const th = state.thesis;
+    if (!th.title && meta.title) th.title = meta.title;
+    if (!th.keywords && meta.keywords) th.keywords = meta.keywords;
+    if (!th.period && meta.period) th.period = meta.period;
+    if (!th.place && meta.area && meta.area.name) th.place = meta.area.name;
+    state.credits = { author: meta.author || '', year: meta.year || '', institution: meta.institution || '', license: meta.license || '' };
+  }
+
+  async saveCurrent({ thumb = false, sync = false } = {}) {
+    const cur = this.current;
+    if (!cur || !this.state) return;
+    const json = serializeState(this.state);
+    let thumbUrl = null;
+    if (thumb && this.editorReady && !document.getElementById('app').hidden) thumbUrl = this.captureThumb();
+    if (sync) { saveMap(cur.mapId, JSON.parse(json), { thumb: thumbUrl }); return; }
+    try {
+      const m = await saveMap(cur.mapId, JSON.parse(json), { thumb: thumbUrl });
+      if (m && this.current && this.current.mapId === m.id) {
+        const it = this.current.maps.find((x) => x.id === m.id);
+        if (it) { it.updated = m.updated; if (thumbUrl) it.thumb = thumbUrl; }
+        this.channel && this.channel.postMessage({ type: 'saved', mapId: m.id, tab: this.tabId });
+        this.markSaved();
+      }
+    } catch (err) {
+      console.error(err);
+      this.toast(`No se pudo guardar en esta computadora: ${err.message}. Exportá el proyecto para no perder cambios.`, 'error');
+    }
+  }
+
+  markSaved() {
+    const s = document.getElementById('save-state');
+    if (!s) return;
+    s.textContent = 'Guardado';
+    s.title = `Guardado en esta computadora a las ${new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })}`;
+    s.classList.remove('dirty');
+  }
+
+  // Miniatura: compone en pequeño los lienzos visibles (mapa, recuadros y la capa de composición)
+  captureThumb(maxW = 420) {
+    try {
+      const paper = this.$.paper;
+      const W = paper.clientWidth, H = paper.clientHeight;
+      if (!W || !H) return null;
+      const k = Math.min(1, maxW / W) * Math.min(2, window.devicePixelRatio || 1);
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(W * k)); c.height = Math.max(1, Math.round(H * k));
+      const x = c.getContext('2d');
+      const paint = (withMaps) => {
+        x.setTransform(1, 0, 0, 1, 0, 0);
+        x.globalAlpha = 1;
+        x.fillStyle = this.state.page.background || '#ffffff';
+        x.fillRect(0, 0, c.width, c.height);
+        if (withMaps) {
+          const containers = [this.$.mapMain, ...[...this.insetViews.values()].map((v) => v.el)];
+          for (const box of containers) {
+            if (!box) continue;
+            const ox = box.offsetLeft, oy = box.offsetTop;
+            box.querySelectorAll('.ol-layer canvas, canvas.ol-layer').forEach((cv) => {
+              if (!cv.width) return;
+              const op = cv.parentNode.style.opacity || cv.style.opacity;
+              x.globalAlpha = op === '' ? 1 : Number(op);
+              const tr = cv.style.transform;
+              const mm = tr && tr.match(/^matrix\(([^(]*)\)$/);
+              const mx = mm ? mm[1].split(',').map(Number) : [parseFloat(cv.style.width) / cv.width || 1, 0, 0, parseFloat(cv.style.height) / cv.height || 1, 0, 0];
+              x.setTransform(k, 0, 0, k, ox * k, oy * k);
+              x.transform(...mx);
+              x.drawImage(cv, 0, 0);
+            });
+          }
+          x.setTransform(1, 0, 0, 1, 0, 0);
+          x.globalAlpha = 1;
+        }
+        x.drawImage(this.$.overlay, 0, 0, c.width, c.height);
+      };
+      paint(true);
+      try { return c.toDataURL('image/jpeg', 0.82); } catch (e) {
+        // algún servicio sin CORS deja el lienzo «manchado»: la miniatura queda solo con la composición
+        paint(false);
+        return c.toDataURL('image/jpeg', 0.82);
+      }
+    } catch (e) { return null; }
+  }
+
+  // Aviso si el mismo mapa está abierto en otra pestaña (los cambios de una pisarían los de la otra)
+  setupChannel() {
+    if (!('BroadcastChannel' in window)) return;
+    this.channel = new BroadcastChannel('mapas-tesis');
+    this.channel.onmessage = (e) => {
+      const d = e.data || {};
+      if (d.tab === this.tabId || !this.current) return;
+      if (d.type === 'open' && d.mapId === this.current.mapId) this.channel.postMessage({ type: 'here', mapId: d.mapId, tab: this.tabId });
+      if ((d.type === 'here' || d.type === 'open' || d.type === 'saved') && d.mapId === this.current.mapId && !this._warnedTwin) {
+        this._warnedTwin = true;
+        this.toast('Este mapa también está abierto en otra pestaña: guardá y trabajá en una sola, porque los cambios de una pisan los de la otra.', 'warn');
+        setTimeout(() => { this._warnedTwin = false; }, 60000);
+      }
+    };
+  }
+  announceOpen() { this._warnedTwin = false; this.channel && this.channel.postMessage({ type: 'open', mapId: this.current.mapId, tab: this.tabId }); }
+
+  // ---------- barra del proyecto: volver al inicio, mapas del proyecto ----------
+  renderProjectBar() {
+    const cur = this.current;
+    const bc = document.getElementById('project-crumb');
+    if (!bc || !cur) return;
+    clear(bc);
+    const menu = el('div', { class: 'menu map-menu', role: 'menu', hidden: true });
+    const btn = el('button', { type: 'button', class: 'crumb-map', 'aria-haspopup': 'true', 'aria-expanded': 'false', title: 'Mapas de este proyecto' },
+      el('span', { class: 'crumb-count' }, `${cur.maps.findIndex((x) => x.id === cur.mapId) + 1}/${cur.maps.length}`), '▾');
+    const fill = () => {
+      clear(menu);
+      menu.append(el('span', { class: 'menu-label' }, `Mapas de «${cur.project.meta.name}»`));
+      for (const m of cur.maps) {
+        menu.append(el('button', { type: 'button', role: 'menuitem', class: `map-item${m.id === cur.mapId ? ' on' : ''}`, onclick: () => { menu.hidden = true; if (m.id !== cur.mapId) location.hash = `#/p/${cur.projectId}/${m.id}`; } },
+          m.thumb ? el('img', { src: m.thumb, alt: '' }) : el('span', { class: 'mi-nothumb' }),
+          el('span', { class: 'mi-name' }, m.name || 'Mapa')));
+      }
+      menu.append(el('hr'),
+        el('button', { type: 'button', role: 'menuitem', onclick: () => { menu.hidden = true; this.newMapDialog(); } }, 'Nuevo mapa en este proyecto…'),
+        el('button', { type: 'button', role: 'menuitem', onclick: async () => { menu.hidden = true; await this.saveCurrent(); const nm = await duplicateMap(cur.mapId, `${this.state.title} (copia)`); await this.reloadMaps(); location.hash = `#/p/${cur.projectId}/${nm.id}`; } }, 'Duplicar este mapa'),
+        el('button', { type: 'button', role: 'menuitem', onclick: () => { menu.hidden = true; this.$.title.focus(); this.$.title.select(); } }, 'Renombrar este mapa'),
+        el('button', { type: 'button', role: 'menuitem', class: 'danger', disabled: cur.maps.length < 2, onclick: () => { menu.hidden = true; this.deleteCurrentMap(); } }, cur.maps.length < 2 ? 'Eliminar este mapa (es el único)' : 'Eliminar este mapa…'));
+    };
+    btn.addEventListener('click', (e) => { e.stopPropagation(); fill(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); });
+    this._mapMenu = { menu, btn };
+    if (!this._mapMenuClose) {
+      this._mapMenuClose = (e) => { const mm = this._mapMenu; if (mm && !mm.menu.contains(e.target) && !mm.btn.contains(e.target)) { mm.menu.hidden = true; mm.btn.setAttribute('aria-expanded', 'false'); } };
+      document.addEventListener('click', this._mapMenuClose);
+    }
+    bc.append(
+      el('button', { type: 'button', class: 'crumb-home', title: 'Volver a los proyectos de esta computadora', onclick: () => this.goHome() }, '← Proyectos'),
+      el('button', { type: 'button', class: 'crumb-project', title: 'Datos del proyecto', onclick: () => this.editProjectMeta() }, cur.project.meta.name || 'Proyecto'),
+      el('span', { class: 'crumb-sep', 'aria-hidden': 'true' }, '/'),
+      el('span', { class: 'crumb-wrap' }, btn, menu));
+  }
+
+  async reloadMaps() {
+    const cur = this.current;
+    if (!cur) return;
+    const maps = await listMaps(cur.projectId);
+    cur.maps = maps.map((x) => ({ id: x.id, name: x.name, updated: x.updated, thumb: x.thumb }));
+    cur.project = await getProject(cur.projectId);
+    this.renderProjectBar();
+  }
+
+  async newMapDialog() {
+    const cur = this.current;
+    const meta = cur.project.meta;
+    const opt = { from: meta.area ? 'area' : 'view', name: `Figura ${cur.maps.length + 1}`, tpl: '' };
+    const nameIn = el('input', { type: 'text', value: opt.name });
+    nameIn.addEventListener('input', () => { opt.name = nameIn.value; });
+    const radios = el('div', { class: 'radio-list' });
+    const choices = [
+      ['view', 'Misma vista, página y estilo que el mapa actual, sin capas temáticas', 'Para una serie de figuras comparables.'],
+      ['area', meta.area ? `Desde el área del proyecto (${meta.area.name || 'área de estudio'})` : 'Desde el área del proyecto (todavía no tiene)', 'Arma un mapa de localización nuevo.'],
+      ['copy', 'Copia completa del mapa actual', 'Para probar otra versión sin tocar la original.'],
+      ['tpl', 'Desde un modelo de ejemplo', ''],
+    ];
+    const tplSel = el('select', { disabled: true }, ...TEMPLATES.map((t) => el('option', { value: t.id }, t.name)));
+    tplSel.addEventListener('change', () => { opt.tpl = tplSel.value; });
+    opt.tpl = TEMPLATES[0].id;
+    for (const [v, t, h] of choices) {
+      const r = el('input', { type: 'radio', name: 'newmap-from', value: v, checked: opt.from === v, disabled: v === 'area' && !meta.area });
+      r.addEventListener('change', () => { opt.from = v; tplSel.disabled = v !== 'tpl'; });
+      radios.append(el('label', { class: 'radio' }, r, el('span', {}, el('strong', {}, t), h ? el('small', {}, h) : null)));
+    }
+    radios.append(el('div', { class: 'radio-sub' }, tplSel));
+    const ok = await formDialog({ title: 'Nuevo mapa en este proyecto', body: el('div', {}, el('label', { class: 'wf' }, el('span', { class: 'wf-l' }, 'Nombre del mapa'), nameIn), radios), ok: 'Crear el mapa', validate: () => (opt.name.trim() ? true : 'El mapa necesita un nombre.') });
+    if (!ok) return;
+    await this.saveCurrent({ thumb: true });
+    let state;
+    if (opt.from === 'copy') state = JSON.parse(serializeState(this.state));
+    else if (opt.from === 'area') state = buildFirstMap(meta, meta.area, { start: 'blank', mediaId: this.state.media.profileId, themeId: this.state.thesis.themeId || meta.themeId, mapName: opt.name, layers: ['ign-departamentos', 'ign-localidades', 'ign-rios', 'ign-ruta-nac', 'ign-ruta-prov'] });
+    else if (opt.from === 'tpl') {
+      const t = TEMPLATES.find((x) => x.id === opt.tpl);
+      if (t.build.after) { try { await t.build.after(this); } catch (e) { /* noop */ } }
+      state = t.build();
+    } else {
+      const s = JSON.parse(serializeState(this.state));
+      s.layers = s.layers.filter((l) => l.def === 'graticule' || (getDef(l.def) && getDef(l.def).kind === 'raster') || l.def === 'ign-departamentos' || l.def === 'ign-localidades');
+      s.sites = []; s.texts = []; s.insets = s.insets.filter((z) => z.mode === 'context');
+      s.interp = normalizeState({}).interp;
+      s.caption = { ...s.caption, figure: opt.name, lead: '' };
+      state = s;
+    }
+    state.title = opt.name.trim();
+    const m = await createMap(cur.projectId, state.title, state);
+    await this.reloadMaps();
+    location.hash = `#/p/${cur.projectId}/${m.id}`;
+  }
+
+  async deleteCurrentMap() {
+    const cur = this.current;
+    if (cur.maps.length < 2) return;
+    const ok = await confirmDialog({ title: 'Eliminar mapa', text: `¿Eliminar el mapa «${this.state.title}» de este proyecto?`, note: 'No se puede deshacer. Los otros mapas del proyecto no se tocan.', ok: 'Eliminar', danger: true });
+    if (!ok) return;
+    const id = cur.mapId;
+    this.current = null;
+    await deleteMap(id);
+    const maps = await listMaps(cur.projectId);
+    location.hash = `#/p/${cur.projectId}/${maps[0].id}`;
+    this.toast('Mapa eliminado.');
+  }
+
+  async editProjectMeta() {
+    const cur = this.current;
+    const before = { ...cur.project.meta };
+    const meta = defaultMeta({ ...cur.project.meta });
+    const { grid } = metaFields(meta);
+    const ok = await formDialog({ title: 'Datos del proyecto', body: grid, ok: 'Guardar', wide: true, validate: () => (meta.name.trim() ? true : 'El proyecto necesita un nombre.') });
+    if (!ok) return;
+    const p = await saveProjectMeta(cur.projectId, meta);
+    cur.project = p;
+    // el mapa abierto toma los cambios en los campos que seguían los datos del proyecto
+    const th = this.state.thesis;
+    if (!th.title || th.title === before.title) th.title = meta.title;
+    if (!th.keywords || th.keywords === before.keywords) th.keywords = meta.keywords;
+    if (!th.period || th.period === before.period) th.period = meta.period;
+    this.state.credits = { author: meta.author || '', year: meta.year || '', institution: meta.institution || '', license: meta.license || '' };
+    this.commit('overlay');
+    this.renderProjectBar();
+    this.renderLeft();
+    document.title = `${this.state.title} · ${meta.name} · Mapas-Tesis`;
+    this.toast('Datos del proyecto guardados.');
+  }
+
+  async newMapFromTemplate(id) {
+    const t = TEMPLATES.find((x) => x.id === id);
+    if (!t || !this.current) return;
+    if (t.build.after) {
+      try { await t.build.after(this); } catch (err) { this.toast(`No se pudo preparar el modelo: ${err.message}`, 'error'); }
+    }
+    await this.saveCurrent({ thumb: true });
+    const state = t.build();
+    const m = await createMap(this.current.projectId, t.name, state);
+    await this.reloadMaps();
+    location.hash = `#/p/${this.current.projectId}/${m.id}`;
+    this.toast(`Nuevo mapa en el proyecto, desde el modelo «${t.name}». El mapa anterior quedó intacto.`);
+  }
+
+  initEditor() {
+    this.editorReady = true;
     this.$ = {
       stage: document.getElementById('stage'), pasteboard: document.getElementById('pasteboard'), paper: document.getElementById('paper'),
       mapMain: document.getElementById('map-main'), overlay: document.getElementById('overlay'), left: document.getElementById('left-body'),
@@ -66,13 +403,8 @@ class App {
     this.layout();
     this.renderLeft();
     this.renderInspector();
-    this.history.push(serializeState(this.state));
     new ResizeObserver(debounce(() => this.layout(), 60)).observe(this.$.pasteboard);
-    window.coniApp = this;
-    window.mapasTesis = this;
     this.applyPreviewFilter();
-    this.preloadImages();
-    if (!saved) setTimeout(() => this.toast('Modelo de ejemplo cargado: Pago Gilense. En la pestaña Tesis podés escribir tu tema, interpretarlo y elegir otros modelos.'), 900);
   }
 
   // Imágenes de planos y del modelo de referencia (IndexedDB): se cargan en memoria y se redibujan las capas
@@ -252,7 +584,11 @@ class App {
     }
     this.redraw();
     this.updateStatusSoon();
-    if (history) { this.scheduleHistory(); this.scheduleSave(); }
+    if (history) {
+      this.scheduleHistory(); this.scheduleSave(); this.scheduleThumb();
+      const ss = document.getElementById('save-state');
+      if (ss) { ss.textContent = 'Guardando…'; ss.classList.add('dirty'); }
+    }
   }
 
   refreshAll() {
@@ -283,19 +619,8 @@ class App {
     this.redraw();
   }
 
-  async loadTemplate(id) {
-    const t = TEMPLATES.find((x) => x.id === id);
-    if (!t) return;
-    if (t.build.after) {
-      try { await t.build.after(this); } catch (err) { this.toast(`No se pudo preparar el modelo: ${err.message}`, 'error'); }
-    }
-    this.state = normalizeState(t.build());
-    this.applyState();
-    this.history.push(serializeState(this.state));
-    this.scheduleSave();
-    this.preloadImages();
-    this.toast(`Modelo cargado: ${t.name}`);
-  }
+  // Un modelo nunca pisa el mapa abierto: se agrega como mapa nuevo del proyecto
+  loadTemplate(id) { return this.newMapFromTemplate(id); }
 
   // Corre leyenda, norte y escala hacia adentro del marco si quedaron afuera (y reparte la leyenda en columnas si es muy alta)
   keepInside(depth = 0) {
@@ -575,7 +900,18 @@ class App {
     projSel.addEventListener('change', () => { this.setProjection(projSel.value); this.renderLeft(); });
     setupSearch(this);
     this.$.title.value = this.state.title;
-    this.$.title.addEventListener('change', () => { this.state.title = this.$.title.value; this.commit('overlay'); });
+    this.$.title.addEventListener('change', async () => {
+      const v = this.$.title.value.trim() || 'Mapa sin nombre';
+      this.$.title.value = v;
+      this.state.title = v;
+      this.commit('overlay');
+      if (this.current) {
+        await renameMap(this.current.mapId, v);
+        const it = this.current.maps.find((x) => x.id === this.current.mapId);
+        if (it) it.name = v;
+        document.title = `${v} · ${this.current.project.meta.name} · Mapas-Tesis`;
+      }
+    });
     document.getElementById('btn-undo').addEventListener('click', () => this.undo());
     document.getElementById('btn-redo').addEventListener('click', () => this.redo());
     document.getElementById('btn-export').addEventListener('click', () => openExportDialog(this));
@@ -590,15 +926,26 @@ class App {
     const menu = document.getElementById('project-menu');
     menuBtn.addEventListener('click', () => { const open = menu.hasAttribute('hidden'); menu.toggleAttribute('hidden', !open); menuBtn.setAttribute('aria-expanded', String(open)); });
     document.addEventListener('click', (e) => { if (!menu.contains(e.target) && e.target !== menuBtn) { menu.setAttribute('hidden', ''); menuBtn.setAttribute('aria-expanded', 'false'); } });
+    const slug = (t) => String(t || 'proyecto').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\w]+/g, '-').toLowerCase().slice(0, 50);
     menu.querySelector('[data-act="save"]').addEventListener('click', async () => {
+      menu.setAttribute('hidden', '');
+      if (!this.current) return;
+      await this.saveCurrent({ thumb: true });
+      this.toast('Preparando el proyecto completo, con todos sus mapas y planos…');
+      const obj = await exportProject(this.current.projectId);
+      downloadBlob(new Blob([JSON.stringify(obj)], { type: 'application/json' }), `${slug(this.current.project.meta.name)}.tesis.json`);
+    });
+    menu.querySelector('[data-act="save-map"]').addEventListener('click', async () => {
       menu.setAttribute('hidden', '');
       const data = JSON.parse(serializeState(this.state));
       const keys = new Set(this.state.interp.sources.map((x) => x.key).filter(Boolean));
       if (this.state.modelRef && this.state.modelRef.key) keys.add(this.state.modelRef.key);
-      if (keys.size) { this.toast('Incluyendo las imágenes de los planos en el archivo…'); data.images = await exportImages([...keys]); }
-      const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
-      downloadBlob(blob, `${(this.state.title || 'proyecto').replace(/[^\wáéíóúñ-]+/gi, '-').slice(0, 50)}.tesis.json`);
+      if (keys.size) data.images = await exportImages([...keys]);
+      downloadBlob(new Blob([JSON.stringify(data)], { type: 'application/json' }), `${slug(this.state.title)}.mapa.json`);
     });
+    menu.querySelector('[data-act="meta"]').addEventListener('click', () => { menu.setAttribute('hidden', ''); this.editProjectMeta(); });
+    menu.querySelector('[data-act="new-map"]').addEventListener('click', () => { menu.setAttribute('hidden', ''); this.newMapDialog(); });
+    menu.querySelector('[data-act="home"]').addEventListener('click', () => { menu.setAttribute('hidden', ''); this.goHome(); });
     const openInput = document.getElementById('open-project');
     menu.querySelector('[data-act="open"]').addEventListener('click', () => { openInput.click(); menu.setAttribute('hidden', ''); });
     openInput.addEventListener('change', async () => {
@@ -606,13 +953,21 @@ class App {
       if (!f) return;
       try {
         const obj = JSON.parse(await readFileAs(f, 'text'));
-        if (obj.images) { await importImages(obj.images); delete obj.images; }
-        this.state = normalizeState(obj);
-        this.applyState();
-        this.history.push(serializeState(this.state));
-        this.preloadImages();
-        this.toast(`Proyecto abierto: ${this.state.title}`);
-      } catch (err) { this.toast(`No se pudo abrir el proyecto: ${err.message}`, 'error'); }
+        if (obj.formato === 'mapas-tesis-proyecto') {
+          const p = await importProject(obj, f.name.replace(/\.json$/i, ''));
+          this.toast(`Proyecto importado como nuevo: ${p.meta.name}`);
+          location.hash = `#/p/${p.id}`;
+        } else if (this.current) {
+          // un mapa suelto se agrega al proyecto abierto
+          if (obj.images) { await importImages(obj.images); delete obj.images; }
+          await this.saveCurrent({ thumb: true });
+          const st = normalizeState(obj);
+          const m = await createMap(this.current.projectId, st.title || f.name.replace(/\.json$/i, ''), st);
+          await this.reloadMaps();
+          location.hash = `#/p/${this.current.projectId}/${m.id}`;
+          this.toast(`Mapa agregado al proyecto: ${st.title}`);
+        }
+      } catch (err) { this.toast(`No se pudo abrir el archivo: ${err.message}`, 'error'); }
       openInput.value = '';
     });
     menu.querySelector('[data-act="sites-geojson"]').addEventListener('click', () => {
@@ -628,7 +983,7 @@ class App {
       menu.setAttribute('hidden', '');
     });
     const tplBox = menu.querySelector('[data-templates]');
-    if (tplBox) for (const t of TEMPLATES) tplBox.append(el('button', { type: 'button', role: 'menuitem', onclick: () => { this.loadTemplate(t.id); menu.setAttribute('hidden', ''); } }, t.name));
+    if (tplBox) for (const t of TEMPLATES) tplBox.append(el('button', { type: 'button', role: 'menuitem', onclick: () => { this.newMapFromTemplate(t.id); menu.setAttribute('hidden', ''); } }, t.name));
     // Paneles en pantallas angostas
     document.querySelectorAll('[data-toggle-panel]').forEach((b) => b.addEventListener('click', () => {
       document.body.classList.toggle(`show-${b.dataset.togglePanel}`);
@@ -823,6 +1178,7 @@ class App {
 
   setupKeyboard() {
     document.addEventListener('keydown', (e) => {
+      if (document.body.classList.contains('on-home') || document.querySelector('dialog[open]')) return;
       const tag = (e.target && e.target.tagName) || '';
       const typing = /INPUT|TEXTAREA|SELECT/.test(tag) || (e.target && e.target.isContentEditable);
       if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) this.redo(); else this.undo(); return; }
@@ -871,5 +1227,5 @@ class App {
 }
 
 const app = new App();
-if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => app.init());
-else app.init();
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => app.boot());
+else app.boot();

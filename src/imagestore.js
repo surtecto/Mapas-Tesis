@@ -1,25 +1,12 @@
 // Almacén de imágenes de planos (IndexedDB) y procesamiento para superponerlos al mapa.
 // Las imágenes no viajan en el historial ni en localStorage: se guardan aparte y se incrustan solo al guardar el proyecto.
-const DB = 'mapas-tesis';
+import { openDB } from './db.js';
+
 const STORE = 'imagenes';
 const MAX_SIDE = 6000;
 
-let dbp = null;
-function db() {
-  if (!dbp) {
-    dbp = new Promise((resolve, reject) => {
-      if (!('indexedDB' in window)) { reject(new Error('El navegador no permite guardar imágenes (IndexedDB).')); return; }
-      const r = indexedDB.open(DB, 1);
-      r.onupgradeneeded = () => r.result.createObjectStore(STORE);
-      r.onsuccess = () => resolve(r.result);
-      r.onerror = () => reject(r.error);
-    });
-    dbp.catch(() => { dbp = null; });
-  }
-  return dbp;
-}
 async function tx(mode, fn) {
-  const d = await db();
+  const d = await openDB();
   return new Promise((resolve, reject) => {
     const t = d.transaction(STORE, mode);
     const st = t.objectStore(STORE);
@@ -28,6 +15,10 @@ async function tx(mode, fn) {
     t.onerror = () => reject(t.error);
     t.onabort = () => reject(t.error || new Error('Operación cancelada'));
   });
+}
+
+export async function allImageKeys() {
+  try { return await tx('readonly', (st) => st.getAllKeys()); } catch (e) { return []; }
 }
 
 // memoria: key → { blob, url, w, h }

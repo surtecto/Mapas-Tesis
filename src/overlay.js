@@ -555,11 +555,12 @@ export function legendItems(state) {
   const usedCats = new Set();
   state.sites.forEach((s) => (s.cats || []).forEach((c) => usedCats.add(c)));
   const halo = state.siteStyle.halo && state.siteStyle.halo.show;
-  for (const c of state.categories) {
+  const sitesOn = state.sitesVisible !== false; // sitios ocultos en el mapa principal: no van a la leyenda
+  for (const c of sitesOn ? state.categories : []) {
     if (!usedCats.has(c.id) && state.legend.onlyUsed !== false) continue;
     items.push({ key: `cat:${c.id}`, label: c.name, sym: halo ? { type: 'halo', color: c.color, ss: state.siteStyle } : { type: 'point', cfg: { ...siteSymbolCfg({ cats: [c.id] }, state) } } });
   }
-  for (const s of state.sites) {
+  for (const s of sitesOn ? state.sites : []) {
     if (s.cats && s.cats.length) continue;
     items.push({ key: `site:${s.id}`, label: s.name, sym: halo ? { type: 'halo', color: s.color || '#555', ss: state.siteStyle } : { type: 'point', cfg: siteSymbolCfg(s, state) } });
   }

@@ -70,7 +70,20 @@ export function buildCaption(state) {
   if (interp) parts.push(interp);
   const dem = state.layers.find((l) => l.visible && l.def === 'dem-analitico' && l.params && l.params.shade && Number(l.params.zFactor) > 1.5);
   if (dem) parts.push(`Relieve sombreado con exageración vertical ×${dem.params.zFactor}.`);
+  const cr = creditsLine(state);
+  if (cr) parts.push(cr);
   return parts.join(' ');
+}
+
+// Autoría de la figura (desde los datos del proyecto)
+export function creditsLine(state) {
+  const c = state.caption || {};
+  const k = state.credits || {};
+  if (c.withAuthor === false || !k.author) return '';
+  const who = [k.author.trim(), k.year ? `(${String(k.year).trim()})` : ''].filter(Boolean).join(' ');
+  const inst = k.institution ? `, ${k.institution.trim()}` : '';
+  const lic = k.license ? ` Licencia ${k.license}.` : '';
+  return `Elaboración: ${who}${inst}.${lic}`.replace(/\.\./g, '.');
 }
 
 // Mapas de interpretación: versión, fuentes históricas y método de georreferenciación

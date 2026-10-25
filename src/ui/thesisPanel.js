@@ -18,7 +18,8 @@ export function renderThesisPanel(app, root) {
   const st = app.state;
   const th = st.thesis;
   root.append(
-    el('div', { class: 'panel-intro' }, el('p', {}, 'Escribí el tema de la tesis y ubicá el lugar: la aplicación lee ambos y propone un lenguaje gráfico (estilo, proyección, capas), junto con preguntas para que la figura no afirme más de lo que la investigación sostiene.')),
+    projectCard(app),
+    el('div', { class: 'panel-intro' }, el('p', {}, 'El tema y el lugar de este mapa (por defecto, los del proyecto): la aplicación los lee y propone un lenguaje gráfico (estilo, proyección, capas), junto con preguntas para que la figura no afirme más de lo que la investigación sostiene.')),
     themeForm(app),
     readingView(app),
     el('h2', { class: 'panel-h' }, 'Estilos de tesis'),
@@ -30,11 +31,24 @@ export function renderThesisPanel(app, root) {
   );
 }
 
+function projectCard(app) {
+  const cur = app.current;
+  if (!cur) return null;
+  const m = cur.project.meta || {};
+  const line = m.author ? `${m.author}${m.year ? ` (${m.year})` : ''}${m.institution ? `, ${m.institution}` : ''}` : '';
+  return el('section', { class: 'proj-card' },
+    el('div', { class: 'proj-card-head' }, el('span', { class: 'pc-kind' }, 'Proyecto'), el('button', { type: 'button', class: 'btn small ghost', onclick: () => app.editProjectMeta() }, 'Editar datos')),
+    el('strong', { class: 'proj-card-name' }, m.name || 'Proyecto'),
+    m.title ? el('span', { class: 'proj-card-title' }, m.title) : null,
+    line ? el('span', { class: 'proj-card-meta' }, line) : el('span', { class: 'proj-card-meta warn' }, 'Sin autoría: el epígrafe no puede firmar la figura.'),
+    el('span', { class: 'proj-card-meta' }, `${cur.maps.length === 1 ? 'Un mapa' : `${cur.maps.length} mapas`}${m.area && m.area.name ? `, área de trabajo: ${m.area.name}` : ''}.`));
+}
+
 function themeForm(app) {
   const th = app.state.thesis;
   const titleTa = text(th, 'title', { multiline: true, rows: 4, placeholder: 'Título o tema de la tesis (también sirve un resumen)', onChange: () => app.scheduleSave() });
   const box = el('div', { class: 'thesis-form' },
-    field('Tema de la tesis', titleTa),
+    field('Tema de este mapa', titleTa),
     field('Palabras clave', text(th, 'keywords', { placeholder: 'separadas por punto y coma', onChange: () => app.scheduleSave() })),
     inlineFields(field('Disciplina', select(th, 'discipline', DISCIPLINES)), field('Período', text(th, 'period', { placeholder: 'siglo XIX, 1850–1930…' }))),
     field('Lugar (se ubica con la vista del mapa o con el buscador de arriba)', text(th, 'place', { placeholder: 'Partido, localidad o región' })),
@@ -183,9 +197,9 @@ function modelsGallery(app) {
   let grp = '';
   for (const t of TEMPLATES) {
     if (t.group !== grp) { grp = t.group; box.append(el('p', { class: 'menu-label' }, grp === 'Tesis' ? 'Tesis: Pago Gilense' : 'Antártida (Coni-Mapas)')); }
-    box.append(el('div', { class: 'tpl' }, el('div', { class: 'tpl-text' }, el('strong', {}, t.name), t.desc ? el('span', {}, t.desc) : null), button('Usar', () => app.loadTemplate(t.id), { kind: 'small' })));
+    box.append(el('div', { class: 'tpl' }, el('div', { class: 'tpl-text' }, el('strong', {}, t.name), t.desc ? el('span', {}, t.desc) : null), button('Nuevo mapa', () => app.loadTemplate(t.id), { kind: 'small' })));
   }
-  box.append(el('p', { class: 'hint' }, 'Usar un modelo reemplaza el proyecto actual (Ctrl+Z vuelve atrás). Guardá antes el proyecto si lo vas a necesitar.'));
+  box.append(el('p', { class: 'hint' }, 'Cada modelo se agrega como un mapa nuevo de este proyecto; el mapa abierto queda como está.'));
   return box;
 }
 

@@ -10,17 +10,20 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=Source+Sans+3:ital,wght@0,400;0,700;1,400;1,700&family=Source+Serif+4:ital,wght@0,400;0,700;1,400;1,700&family=Noto+Sans:ital,wght@0,400;0,700;1,400;1,700&family=Noto+Serif:ital,wght@0,400;0,700;1,400;1,700&family=Roboto+Condensed:ital,wght@0,400;0,700;1,400;1,700&family=Open+Sans:ital,wght@0,400;0,700;1,400;1,700&family=Lato:ital,wght@0,400;0,700;1,400;1,700&family=Merriweather:ital,wght@0,400;0,700;1,400;1,700&family=EB+Garamond:ital,wght@0,400;0,700;1,400;1,700&family=IM+Fell+English:ital@0;1&display=swap">
   <link rel="stylesheet" href="assets/ol.css">
-  <link rel="stylesheet" href="assets/app.css?v=11402ed2d6">
+  <link rel="stylesheet" href="assets/app.css?v=89c15c5e5d">
 </head>
-<body>
-  <div id="app">
+<body class="on-home">
+  <div id="home" class="home" aria-live="polite"></div>
+  <div id="app" hidden>
     <header class="topbar">
       <button type="button" class="icon panel-toggle" data-toggle-panel="left" aria-label="Mostrar u ocultar el panel de capas">☰</button>
-      <div class="brand" aria-label="Mapas-Tesis">
+      <a class="brand" href="#/" aria-label="Mapas-Tesis: volver a los proyectos" title="Volver a los proyectos">
         <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M4 23c5-1 8-4 12-4s7 3 12 2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 17c4-.6 7-2.6 11-2.6S22 17 28 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.2 1.6" opacity=".8"/><path d="M5 27h22" stroke="currentColor" stroke-width="1.2" opacity=".55"/><rect x="9" y="5" width="11" height="8" fill="none" stroke="#e8501c" stroke-width="1.6" transform="rotate(-8 14.5 9)"/><circle cx="23.5" cy="8" r="1.6" fill="#e8501c"/></svg>
         <span class="wordmark">Mapas-Tesis</span>
-      </div>
-      <input id="title" class="title-input" type="text" aria-label="Título del proyecto" spellcheck="false">
+      </a>
+      <nav class="crumbs" id="project-crumb" aria-label="Proyecto y mapa"></nav>
+      <input id="title" class="title-input" type="text" aria-label="Nombre del mapa" title="Nombre del mapa (se puede cambiar)" spellcheck="false">
+      <span id="save-state" class="save-state" aria-live="polite">Guardado</span>
       <div class="search-wrap" role="search">
         <input id="place-search" type="search" placeholder="Buscar lugar o coordenadas…" aria-label="Buscar un lugar o coordenadas" aria-controls="place-results" aria-expanded="false" autocomplete="off" spellcheck="false">
         <button type="button" id="place-go" class="icon" aria-label="Buscar">⌕</button>
@@ -35,14 +38,21 @@
         <div class="menu-wrap">
           <button type="button" id="btn-project" class="btn ghost" aria-haspopup="true" aria-expanded="false">Proyecto</button>
           <div id="project-menu" class="menu" role="menu" hidden>
-            <button type="button" role="menuitem" data-act="save">Guardar proyecto con sus planos (.json)</button>
-            <button type="button" role="menuitem" data-act="open">Abrir proyecto…</button>
+            <span class="menu-label">Se guarda solo en esta computadora mientras trabajás</span>
+            <button type="button" role="menuitem" data-act="meta">Datos del proyecto…</button>
+            <button type="button" role="menuitem" data-act="new-map">Nuevo mapa en este proyecto…</button>
+            <hr>
+            <button type="button" role="menuitem" data-act="save">Exportar el proyecto completo, con planos (.json)</button>
+            <button type="button" role="menuitem" data-act="save-map">Exportar solo este mapa (.json)</button>
+            <button type="button" role="menuitem" data-act="open">Importar un proyecto o un mapa…</button>
             <hr>
             <button type="button" role="menuitem" data-act="sites-csv">Descargar sitios (CSV)</button>
             <button type="button" role="menuitem" data-act="sites-geojson">Descargar sitios (GeoJSON)</button>
             <hr>
-            <span class="menu-label">Empezar desde un modelo</span>
+            <span class="menu-label">Nuevo mapa desde un modelo</span>
             <div class="menu-templates" data-templates></div>
+            <hr>
+            <button type="button" role="menuitem" data-act="home">Volver a los proyectos</button>
           </div>
           <input type="file" id="open-project" accept=".json,application/json" hidden>
         </div>
@@ -98,6 +108,10 @@
     <div class="gr-body"></div>
   </dialog>
 
+  <dialog id="app-dialog" class="app-dialog" aria-labelledby="app-dialog-title">
+    <div class="dlg"><h2 class="dlg-title" id="app-dialog-title"></h2><div class="dlg-body"></div></div>
+  </dialog>
+
   <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
     <!-- simulación de daltonismo (Machado, Oliveira y Fernandes, 2009) -->
     <filter id="cvd-deutan" color-interpolation-filters="linearRGB"><feColorMatrix type="matrix" values="0.367322 0.860646 -0.227968 0 0  0.280085 0.672501 0.047413 0 0  -0.011820 0.042940 0.968881 0 0  0 0 0 1 0"/></filter>
@@ -106,6 +120,6 @@
   </svg>
 
   <div id="toast" class="toast" aria-live="polite"></div>
-  <script src="assets/app.js?v=11402ed2d6"></script>
+  <script src="assets/app.js?v=89c15c5e5d"></script>
 </body>
 </html>
