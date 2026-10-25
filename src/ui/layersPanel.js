@@ -28,8 +28,10 @@ function typeBadge(def, ls) {
 export function insertIndexFor(state, def) {
   const layers = state.layers;
   if (def.kind === 'raster') {
+    // las bases ráster van debajo de los planos georreferenciados
+    const gi = def.type === 'georef' ? -1 : layers.findIndex((l) => l.def === 'georef');
     let idx = 0;
-    layers.forEach((l, i) => { const d = getDef(l.def); if (d && d.kind === 'raster') idx = i + 1; });
+    layers.forEach((l, i) => { const d = getDef(l.def); if (d && d.kind === 'raster' && (gi < 0 || i < gi)) idx = i + 1; });
     return idx;
   }
   const g = layers.findIndex((l) => l.def === 'graticule');

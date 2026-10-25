@@ -225,8 +225,8 @@ export async function sampleRelief(bboxLL, { maxTiles = 9 } = {}) {
   const land = vals.filter((v) => v > 0.5);
   const res = { min: q(0), p02: q(0.02), p50: q(0.5), p98: q(0.98), max: q(1), n: vals.length, zoom: z, seaShare: 1 - land.length / vals.length };
   res.amp = res.p98 - res.p02;
-  res.kind = res.amp < 40 ? 'llanura muy plana' : res.amp < 150 ? 'llanura ondulada' : res.amp < 700 ? 'relieve serrano' : 'relieve montañoso';
-  res.zFactor = res.amp < 40 ? 15 : res.amp < 150 ? 8 : res.amp < 700 ? 3 : 1.5;
+  res.kind = res.amp < 15 ? 'llanura muy plana' : res.amp < 150 ? 'llanura ondulada' : res.amp < 700 ? 'relieve serrano' : 'relieve montañoso';
+  res.zFactor = res.amp < 15 ? 20 : res.amp < 60 ? 12 : res.amp < 150 ? 8 : res.amp < 700 ? 3 : 1.5;
   return res;
 }
 

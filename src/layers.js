@@ -106,7 +106,9 @@ function readFeatures(obj, projCode) {
 const rasterSources = new Map();
 function cacheKey(ls, extra = '') { return `${ls.uid}:${ls.rev}:${extra}`; }
 
-const IGN_WMS_PROJ = ['EPSG:3857', 'EPSG:3031', 'EPSG:4326', 'EPSG:6932', 'EPSG:32720', 'EPSG:32721', 'EPSG:5343', 'EPSG:5344', 'EPSG:5345', 'EPSG:5346', 'EPSG:5347', 'EPSG:5348', 'EPSG:5349', 'EPSG:22195'];
+// Las fajas POSGAR y Campo Inchauspe no van en la lista: en WMS 1.3.0 GeoServer espera el eje Norte primero
+// para esos códigos; se piden en Mercator y OpenLayers las reproyecta.
+const IGN_WMS_PROJ = ['EPSG:3857', 'EPSG:3031', 'EPSG:4326', 'EPSG:6932', 'EPSG:32720', 'EPSG:32721'];
 
 function wmsRequestProjection(def, mapProj) {
   const list = def.wmsProjections || IGN_WMS_PROJ;
