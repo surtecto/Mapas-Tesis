@@ -257,14 +257,23 @@ export function openImageryDialog(app, { tab } = {}) {
     };
     fillScenes();
     const run = el('button', { type: 'button', class: 'btn primary' }, 'Clasificar la vista');
+    const prog = el('p', { class: 'note', 'aria-live': 'polite' });
+    let ctl = null;
+    const cancel = el('button', { type: 'button', class: 'btn ghost', hidden: true, onclick: () => { if (ctl) ctl.abort(); } }, 'Cancelar');
     run.addEventListener('click', async () => {
       run.disabled = true;
+      cancel.hidden = false;
+      ctl = new AbortController();
+      const t0 = Date.now();
+      const tick = setInterval(() => { prog.textContent = `El servidor de imágenes está componiendo las seis bandas de la vista (${Math.round((Date.now() - t0) / 1000)} s; la primera vez suele tardar entre 20 segundos y un minuto).`; }, 1000);
       try {
         const s = SENSORS[ui.kSensor];
         const src = sceneSel.value ? app.state.layers.find((l) => l.uid === sceneSel.value) : null;
         const mosaic = src ? src.svc.mosaic : sceneLayerDef(ui.kSensor, null, 'None').mosaic;
         run.textContent = 'Descargando bandas…';
-        const img = await exportBands(ui.kSensor, view(), mosaic, 900);
+        const img = await exportBands(ui.kSensor, view(), mosaic, 560, ctl.signal);
+        clearInterval(tick);
+        prog.textContent = '';
         run.textContent = 'Agrupando píxeles…';
         await new Promise((r) => setTimeout(r, 30));
         const res = classify(img, ui.k);
@@ -292,7 +301,10 @@ export function openImageryDialog(app, { tab } = {}) {
           el('p', { class: 'note' }, `Las clases son grupos de píxeles con respuesta espectral parecida; los nombres son una sugerencia según el NDVI y el NDWI medios. Revisalos con la imagen y renombralos desde la capa: la interpretación es tuya. Píxel de ${Math.round(img.pxMeters)} m.`),
           el('table', { class: 'stat-table' }, el('thead', {}, el('tr', {}, el('th', {}, 'Clase'), el('th', {}, 'ha'), el('th', {}, '%'), el('th', {}, 'NDVI'))), tb),
           el('div', { class: 'btn-row' }, el('button', { type: 'button', class: 'btn small ghost', onclick: () => downloadBlob(new Blob([csv(rows)], { type: 'text/csv' }), 'clasificacion.csv') }, 'Descargar CSV')));
-      } catch (e) { app.toast(`No se pudo clasificar: ${e.message}`, 'error'); }
+      } catch (e) { app.toast(e.name === 'AbortError' ? 'Clasificación cancelada.' : `No se pudo clasificar: ${e.message}`, e.name === 'AbortError' ? 'info' : 'error'); }
+      clearInterval(tick);
+      prog.textContent = '';
+      cancel.hidden = true;
       run.disabled = false; run.textContent = 'Clasificar la vista';
     });
     out.append(el('p', { class: 'note' }, 'Agrupa los píxeles de la vista según su respuesta en seis bandas (azul, verde, rojo, infrarrojo cercano y dos de onda corta) más el NDVI y el NDWI. Sirve para explorar patrones del paisaje que la cobertura global no distingue; no reemplaza una clasificación supervisada con verdad de campo.'));
@@ -301,8 +313,9 @@ export function openImageryDialog(app, { tab } = {}) {
         el('div', { class: 'seg' }, ...Object.values(SENSORS).map((x) => el('button', { type: 'button', class: ui.kSensor === x.id ? 'on' : '', onclick: () => { ui.kSensor = x.id; paint(); } }, x.name))),
         fld('Imagen', sceneSel, 'Para fijar una fecha, agregá antes la imagen desde «Imagen por fecha».'),
         fld('Cantidad de clases', kIn),
-        el('div', { class: 'btn-row' }, run),
-        el('p', { class: 'note' }, 'La vista se baja a unos 900 píxeles de lado: para más detalle, acercá el mapa al área de interés.')),
+        el('div', { class: 'btn-row' }, run, cancel),
+        prog,
+        el('p', { class: 'note' }, 'La vista se baja a unos 560 píxeles de lado: para más detalle, acercá el mapa al área de interés.')),
       out);
   }
 

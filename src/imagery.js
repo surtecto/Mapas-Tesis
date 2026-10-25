@@ -17,7 +17,8 @@ export const SENSORS = {
       ['Normalized Burn Ratio', 'NBR: áreas quemadas'],
     ],
     // índices de banda (desde 0): B2 azul, B3 verde, B4 rojo, B8 infrarrojo cercano, B11 y B12 infrarrojo de onda corta
-    bands: [1, 2, 3, 7, 11, 12], scale: 1 / 10000,
+    // nivel 2A desde 2022: reflectancia = (DN − 1000) / 10000
+    bands: [1, 2, 3, 7, 11, 12], scale: 1 / 10000, offset: 1000,
   },
   landsat: {
     id: 'landsat', name: 'Landsat', res: 30, url: 'https://landsat2.arcgis.com/arcgis/rest/services/Landsat/MS/ImageServer',
@@ -226,37 +227,43 @@ export async function changeImage(g1, g2, classes, { stable = 'transparent' } = 
 }
 
 // ---------- clasificación propia ----------
-export async function exportBands(sensorId, bboxLL, mosaic, maxPx = 900) {
+// El servidor compone las bandas al vuelo: con 560 px de lado tarda entre 20 s y un minuto la primera vez
+export async function exportBands(sensorId, bboxLL, mosaic, maxPx = 560, signal) {
   const s = SENSORS[sensorId];
   const { b, w, h } = gridFor(bboxLL, maxPx);
   const p = new URLSearchParams({
-    bbox: b.join(','), bboxSR: '3857', imageSR: '3857', size: `${w},${h}`, format: 'tiff', pixelType: 'F32', f: 'image',
+    bbox: b.join(','), bboxSR: '3857', imageSR: '3857', size: `${w},${h}`, format: 'tiff', pixelType: 'U16', f: 'image',
     renderingRule: JSON.stringify({ rasterFunction: 'None' }), bandIds: s.bands.join(','), mosaicRule: JSON.stringify(mosaic), interpolation: 'RSP_BilinearInterpolation',
   });
-  const r = await fetch(`${s.url}/exportImage?${p}`);
+  const r = await fetch(`${s.url}/exportImage?${p}`, { signal });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const buf = await r.arrayBuffer();
+  if (buf.byteLength < 2000) {
+    const t = new TextDecoder().decode(buf);
+    throw new Error(/error|exception/i.test(t) ? t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 160) : 'el servidor no devolvió la imagen');
+  }
   const tiff = await fromArrayBuffer(buf);
   const image = await tiff.getImage();
   const rasters = await image.readRasters();
   const bands = Array.from({ length: rasters.length }, (_, i) => rasters[i]);
-  return { w: image.getWidth(), h: image.getHeight(), bands, b, scale: s.scale, areas: rowAreas(b, image.getWidth(), image.getHeight()), pxMeters: (b[2] - b[0]) / image.getWidth() };
+  return { w: image.getWidth(), h: image.getHeight(), bands, b, scale: s.scale, offset: s.offset || 0, areas: rowAreas(b, image.getWidth(), image.getHeight()), pxMeters: (b[2] - b[0]) / image.getWidth() };
 }
 
 // k-means con inicio k-means++ sobre una muestra; rasgos: 6 bandas de reflectancia normalizadas + NDVI + NDWI
 export function classify(img, k = 6, { iters = 14, sample = 24000, seed = 7 } = {}) {
   const { w, h, bands, scale } = img;
+  const off = img.offset || 0;
   const n = w * h;
   const F = 8;
   const feat = new Float32Array(n * F);
   const valid = new Uint8Array(n);
   let rnd = seed;
   const rand = () => { rnd = (rnd * 1664525 + 1013904223) % 4294967296; return rnd / 4294967296; };
+  const [B0, B1, B2, B3, B4, B5] = bands;
   for (let i = 0; i < n; i++) {
-    let ok = true;
-    const v = bands.map((bd) => { const x = bd[i] * scale; if (!Number.isFinite(x) || x <= 0) ok = false; return x; });
-    if (!ok) continue;
-    const [bl, gr, rd, nir, sw1, sw2] = v;
+    if (!B0[i] || !B3[i]) continue; // sin dato
+    const bl = (B0[i] - off) * scale, gr = (B1[i] - off) * scale, rd = (B2[i] - off) * scale, nir = (B3[i] - off) * scale, sw1 = (B4[i] - off) * scale, sw2 = (B5[i] - off) * scale;
+    if (!(bl > -0.05 && gr > 0 && rd > 0 && nir > 0 && sw1 > 0 && sw2 > 0)) continue;
     const ndvi = (nir - rd) / (nir + rd || 1);
     const ndwi = (gr - nir) / (gr + nir || 1);
     const o = i * F;
