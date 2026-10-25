@@ -135,6 +135,7 @@ export async function renderRaster(app, dpi, opts = {}) {
     }
     const geo = geoFor(maps.mainCtx, maps.insetCtxs, f, CSS_PX_PER_MM);
     drawOverlay(ctx, s, geo, st, { preview: false });
+    if (st.render && st.render.colorMode === 'grises') toGray(canvas);
     return { canvas, W, H, tileErrors: maps.tileErrors };
   } finally {
     maps.cleanup();
@@ -200,10 +201,27 @@ export async function renderSvg(app, dpi, opts = {}) {
       svg.endGroup();
     }
     drawOverlay(svg, s, geo, st, { preview: false });
-    return { svg: svg.toString(st.page.widthMM, st.page.heightMM, st.title), tileErrors: maps.tileErrors };
+    return { svg: svg.toString(st.page.widthMM, st.page.heightMM, st.title, { gray: !!(st.render && st.render.colorMode === 'grises') }), tileErrors: maps.tileErrors };
   } finally {
     maps.cleanup();
   }
+}
+
+// Conversión a escala de grises (luminancia Rec. 709), para tesis impresas en blanco y negro
+export function toGray(canvas) {
+  const x = canvas.getContext('2d');
+  const step = 2048;
+  for (let y0 = 0; y0 < canvas.height; y0 += step) {
+    const h = Math.min(step, canvas.height - y0);
+    const d = x.getImageData(0, y0, canvas.width, h);
+    const a = d.data;
+    for (let i = 0; i < a.length; i += 4) {
+      const v = Math.round(0.2126 * a[i] + 0.7152 * a[i + 1] + 0.0722 * a[i + 2]);
+      a[i] = v; a[i + 1] = v; a[i + 2] = v;
+    }
+    x.putImageData(d, 0, y0);
+  }
+  canvas._gray = true;
 }
 
 // ---------- codificadores ----------
@@ -273,11 +291,14 @@ function rgbBytes(canvas) {
 // TIFF RGB 8 bits con compresión Deflate (Adobe), resolución en ppp
 export function canvasToTiff(canvas, dpi) {
   const W = canvas.width, H = canvas.height;
-  const comp = zlibSync(rgbBytes(canvas), { level: 6 });
-  const software = 'Coni-Mapas\0';
+  const gray = !!canvas._gray;
+  let raw = rgbBytes(canvas);
+  if (gray) { const g = new Uint8Array(W * H); for (let i = 0, j = 0; i < g.length; i++, j += 3) g[i] = raw[j]; raw = g; }
+  const comp = zlibSync(raw, { level: 6 });
+  const software = 'Mapas-Tesis\0';
   const entries = [
-    [256, 4, [W]], [257, 4, [H]], [258, 3, [8, 8, 8]], [259, 3, [8]], [262, 3, [2]], [273, 4, [0]],
-    [277, 3, [3]], [278, 4, [H]], [279, 4, [comp.length]], [282, 5, [dpi]], [283, 5, [dpi]], [284, 3, [1]], [296, 3, [2]], [305, 2, software],
+    [256, 4, [W]], [257, 4, [H]], [258, 3, gray ? [8] : [8, 8, 8]], [259, 3, [8]], [262, 3, [gray ? 1 : 2]], [273, 4, [0]],
+    [277, 3, [gray ? 1 : 3]], [278, 4, [H]], [279, 4, [comp.length]], [282, 5, [dpi]], [283, 5, [dpi]], [284, 3, [1]], [296, 3, [2]], [305, 2, software],
   ].sort((a, b) => a[0] - b[0]);
   const ifdSize = 2 + entries.length * 12 + 4;
   const extraStart = 8 + ifdSize;
@@ -352,7 +373,7 @@ export async function canvasToPdf(canvas, state, { lossless = false, quality = 0
   obj(4, () => { push(`<< /Type /XObject /Subtype /Image /Width ${W} /Height ${H} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter ${filter} /Length ${imgBytes.length} >>\nstream\n`); push(imgBytes); push('\nendstream'); });
   const content = `q ${wPt.toFixed(3)} 0 0 ${hPt.toFixed(3)} 0 0 cm /Im0 Do Q`;
   obj(5, () => push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`));
-  obj(6, () => push(`<< /Title ${pdfStr(state.title || 'Mapa')} /Creator (Coni-Mapas) /Producer (Coni-Mapas) /CreationDate (${d}) >>`));
+  obj(6, () => push(`<< /Title ${pdfStr(state.title || 'Mapa')} /Creator (Mapas-Tesis) /Producer (Mapas-Tesis) /CreationDate (${d}) >>`));
   const xref = pos;
   push(`xref\n0 7\n0000000000 65535 f \n`);
   for (let i = 1; i <= 6; i++) push(`${String(offsets[i]).padStart(10, '0')} 00000 n \n`);

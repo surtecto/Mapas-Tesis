@@ -3,7 +3,8 @@
 // la exportación ráster y la exportación SVG comparten exactamente el mismo código.
 import { getDistance } from 'ol/sphere.js';
 import { PT_MM, rgba, convexHull, segmentPolygonT, polygonCentroid, niceLength, roundScale, fmtInt, formatGridLabel, pointInPolygon } from './util.js';
-import { drawSymbol, dashArray, dashCap, fontString, getPattern } from './styles.js';
+import { drawSymbol, dashArray, dashCap, fontString, getPattern, drawDecoratedLine } from './styles.js';
+import { CERTAINTY } from './state.js';
 import { lonLatTo, toLonLatFrom } from './projections.js';
 import { getDef } from './catalog.js';
 import { siteSymbolCfg } from './layers.js';
@@ -392,7 +393,7 @@ export function siteLabelOffset(site, state) {
   return [dx, dy];
 }
 
-function drawSitesIn(ctx, s, scope, state) {
+function drawSitesIn(ctx, s, scope, state, { labels: withLabels = true } = {}) {
   const ss = state.siteStyle;
   const pxPerPt = PT_MM * s;
   const labels = [];
@@ -427,7 +428,7 @@ function drawSitesIn(ctx, s, scope, state) {
     } else drawSymbol(ctx, p[0] * s, p[1] * s, cfg, pxPerPt);
     const lab = ss.label;
     const show = site.label && site.label.show === false ? false : lab.show;
-    if (show && site.name) labels.push({ site, p });
+    if (show && site.name && withLabels) labels.push({ site, p });
   }
   const lab = ss.label;
   for (const { site, p } of labels) {
@@ -460,7 +461,8 @@ function drawSites(ctx, s, geo, state) {
     ctx.save();
     insetShapePath(ctx, s, ins);
     ctx.clip();
-    drawSitesIn(ctx, s, ig, state);
+    // en los mapas de ubicación el sitio se marca sin rótulo (salvo que se pida)
+    drawSitesIn(ctx, s, ig, state, { labels: ins.mode !== 'context' || !!ins.siteLabels });
     ctx.restore();
   }
 }
@@ -563,11 +565,14 @@ export function legendItems(state) {
   }
   for (let i = state.layers.length - 1; i >= 0; i--) {
     const ls = state.layers[i];
+    if (ls.def === 'interp') { if (ls.visible && ls.legend && ls.legend.show !== false) interpLegendItems(state, ls, items); continue; }
     if (!ls.visible || !ls.legend || !ls.legend.show || !ls.style) continue;
     const def = ls.def === 'user' ? { geom: userGeomType(ls) } : getDef(ls.def);
     if (!def || !def.geom) continue;
     const st = ls.style;
-    const cat = st.categorize && st.categorize.field && st.categorize.values ? Object.entries(st.categorize.values) : [];
+    const cz = st.categorize || {};
+    const cat = cz.field && cz.mode === 'ranges' ? (cz.ranges || []).map((r) => [r.label || `${r.min}–${r.max}`, r.color])
+      : cz.field && cz.values ? Object.entries(cz.values) : [];
     if (cat.length && ls.legend.expand !== false) {
       for (const [val, col] of cat) {
         items.push({ key: `layer:${ls.uid}:${val}`, label: val, sym: symFromStyle(def.geom, st, col) });
@@ -588,6 +593,23 @@ export function legendItems(state) {
     });
   }
   return out;
+}
+
+function interpLegendItems(state, ls, items) {
+  const it = state.interp;
+  const vid = ls.params && ls.params.version && ls.params.version !== 'active' ? ls.params.version : it.active;
+  const ver = it.versions.find((v) => v.id === vid);
+  if (!ver) return;
+  if (ls.params && ls.params.ghost) {
+    items.push({ key: `interp:ghost:${ver.id}`, label: `${ver.name} (versión anterior)`, sym: { type: 'line', line: { color: '#8a8a8a', width: 0.7, dash: 'short' } } });
+    return;
+  }
+  const used = new Set(), certs = new Set();
+  for (const f of ver.features.features || []) { used.add(f.properties && f.properties.cat); certs.add((f.properties && f.properties.cert) || 'cierta'); }
+  for (const c of it.categories) if (used.has(c.id)) items.push({ key: `interp:${c.id}`, label: c.name, sym: { type: 'interp', cat: c, cert: 'cierta' } });
+  if (certs.size > 1 || (certs.size === 1 && !certs.has('cierta'))) {
+    for (const ce of CERTAINTY) if (certs.has(ce.id)) items.push({ key: `interp:cert:${ce.id}`, label: ce.name, sym: { type: 'cert', cert: ce.id } });
+  }
 }
 
 function symFromStyle(geom, st, color) {
@@ -611,9 +633,30 @@ function drawLegendSymbol(ctx, s, sym, x, y, size) {
     ctx.lineWidth = Math.min(sym.ss.halo.strokeWidth, 2.2) * pxPerPt; ctx.strokeStyle = sym.color; ctx.setLineDash([]); ctx.stroke();
   } else if (sym.type === 'line') {
     ctx.save();
-    setStroke(ctx, s, { color: sym.line.color, width: sym.line.width, dash: sym.line.dash, opacity: sym.line.opacity });
+    if (sym.line.deco && sym.line.deco !== 'none') {
+      drawDecoratedLine(ctx, [[(x - size * 0.75) * s, y * s], [(x + size * 0.75) * s, y * s]], { ...sym.line, decoSpacing: Math.min(sym.line.decoSpacing || 2.6, size * 0.6) }, pxPerPt);
+    } else {
+      setStroke(ctx, s, { color: sym.line.color, width: sym.line.width, dash: sym.line.dash, opacity: sym.line.opacity });
+      ctx.beginPath(); ctx.moveTo((x - size * 0.75) * s, y * s); ctx.lineTo((x + size * 0.75) * s, y * s); ctx.stroke();
+    }
+    ctx.restore();
+  } else if (sym.type === 'cert') {
+    const ce = CERTAINTY.find((c) => c.id === sym.cert) || CERTAINTY[0];
+    ctx.save();
+    setStroke(ctx, s, { color: '#3a3a3a', width: 0.9, dash: ce.dash });
     ctx.beginPath(); ctx.moveTo((x - size * 0.75) * s, y * s); ctx.lineTo((x + size * 0.75) * s, y * s); ctx.stroke();
     ctx.restore();
+  } else if (sym.type === 'interp') {
+    const c = sym.cat;
+    if (c.geom === 'line') {
+      ctx.save();
+      drawDecoratedLine(ctx, [[(x - size * 0.75) * s, y * s], [(x + size * 0.75) * s, y * s]], { color: c.color, width: c.width || 0.8, dash: 'solid', deco: c.deco || 'none', decoColor: c.decoColor, decoSpacing: Math.min(2.6, size * 0.6) }, pxPerPt);
+      ctx.restore();
+    } else if (c.geom === 'polygon') {
+      drawLegendSymbol(ctx, s, { type: 'polygon', pg: { fill: c.color, fillOpacity: 0.35, pattern: c.pattern || 'none', patternColor: c.color, patternSpacing: 1.6, patternWidth: 0.3, stroke: c.color, strokeWidth: c.width || 0.6, strokeOpacity: 1, dash: 'solid' } }, x, y, size);
+    } else {
+      drawSymbol(ctx, x * s, y * s, { shape: c.shape || 'circle', size: Math.min(c.size || 5, (size / PT_MM) * 1.1), fill: c.color, fillOpacity: 1, stroke: '#ffffff', strokeWidth: 0.5 }, pxPerPt);
+    }
   } else if (sym.type === 'polygon') {
     const pg = sym.pg;
     const w = size * 1.5, h = size * 0.85;

@@ -1,7 +1,7 @@
 {
-  "name": "coni-mapas",
-  "version": "1.0.0",
-  "description": "Generador de mapas de localización para investigación antártica",
+  "name": "mapas-tesis",
+  "version": "2.0.0",
+  "description": "Generador de mapas para tesis: interpretación del tema y del lugar, destinos de la figura y mapas de interpretación sobre planos históricos",
   "scripts": {
     "build": "node tools/build.mjs",
     "dev": "node tools/build.mjs --dev"

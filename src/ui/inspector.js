@@ -6,6 +6,7 @@ import { DASH_OPTIONS, SHAPES } from '../styles.js';
 import { PROJECTIONS } from '../projections.js';
 import { legendItems } from '../overlay.js';
 import { siteBody } from './sitesPanel.js';
+import { featureEditor } from './interpPanel.js';
 
 const ALIGN = [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']];
 
@@ -23,7 +24,8 @@ export function renderInspector(app, root) {
         el('li', {}, 'El círculo chico sobre el mapa marca qué se amplía: arrastralo para cambiar el área.'),
         el('li', {}, 'Los sitios se arrastran para corregir su posición.'),
         el('li', {}, 'Supr borra el elemento seleccionado; las flechas lo desplazan 0,5 mm (con Mayús, 5 mm).'),
-        el('li', {}, 'Ctrl+Z deshace; Ctrl+Mayús+Z rehace.')),
+        el('li', {}, 'Ctrl+Z deshace; Ctrl+Mayús+Z rehace.'),
+        el('li', {}, 'En la pestaña Interpretación, los trazos dibujados se tocan para editar su nombre, período, fuente y certeza.')),
     );
     return;
   }
@@ -41,6 +43,8 @@ export function renderInspector(app, root) {
     const z = st.insets.find((x) => x.id === sel.id);
     if (!z) return;
     root.append(title(z.mode === 'detail' ? 'Zoom de detalle' : 'Mapa de ubicación', () => { st.insets = st.insets.filter((x) => x !== z); app.select(null); app.commit('insets'); app.renderLeft(); }), insetEditor(app, z));
+  } else if (sel.kind === 'interp') {
+    root.append(title('Elemento de interpretación'), featureEditor(app, sel.id));
   } else if (sel.kind === 'site') {
     const s = st.sites.find((x) => x.id === sel.id);
     if (!s) return;

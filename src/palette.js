@@ -3,6 +3,12 @@ import { hexToRgb, rgbToHex, rgbToLab, deltaE, simulateCVD, clamp } from './util
 
 export const PALETTES = [
   { id: 'pinguinos', name: 'Pingüinos (de tu gráfico: Adelia, Emperador, Papúa)', colors: ['#3176b1', '#e29f2c', '#36a177'], labels: ['Adelia', 'Emperador', 'Papúa'] },
+  { id: 'sepia', name: 'Tinta y sepia (cartografía histórica)', colors: ['#8c2f1b', '#2f5d8c', '#6b4a2b', '#5a3d7a', '#4f7a5a', '#b07a2a', '#3b3b3b'] },
+  { id: 'pampa', name: 'Pampa (tierras, pastos y aguas)', colors: ['#4f7a5a', '#c9a66b', '#3b78a8', '#b5523b', '#8a7a66', '#d9c58a', '#6b4a2b'] },
+  { id: 'periodos', name: 'Períodos históricos (secuencial marrón–verde azulado)', colors: ['#8c510a', '#bf812d', '#dfc27d', '#80cdc1', '#35978f', '#01665e'] },
+  { id: 'agua', name: 'Aguas (azules distinguibles)', colors: ['#08519c', '#3182bd', '#6baed6', '#9ecae1', '#2c7fb8', '#41b6c4'] },
+  { id: 'grises', name: 'Grises para impresión en blanco y negro (5 niveles)', colors: ['#1a1a1a', '#4d4d4d', '#808080', '#b3b3b3', '#e0e0e0'], gray: true },
+  { id: 'proyector', name: 'Proyector y videollamada (saturada, alto contraste)', colors: ['#d62728', '#1f5fbf', '#2ca02c', '#ff8c00', '#8e44ad', '#111111'] },
   { id: 'modelo1', name: 'Modelo 1 (azul, amarillo, rojo)', colors: ['#1747e8', '#f7e017', '#ee1c1c'] },
   { id: 'modelo2', name: 'Modelo 2 (celeste, naranja, violeta)', colors: ['#8ebdd9', '#f98f39', '#651368'] },
   { id: 'okabe', name: 'Okabe–Ito (apta daltonismo)', colors: ['#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', '#000000'] },
@@ -185,4 +191,24 @@ export function paletteDiagnostics(colors) {
     out.push({ type: t, label, minDeltaE: isFinite(min) ? min : null, pair, simulated: sim.map(rgbToHex) });
   }
   return out;
+}
+
+// Escala de grises con luminancia uniformemente espaciada (para impresión en blanco y negro)
+export function grayLevels(n, { light = 0.88, dark = 0.12 } = {}) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    const L = dark + (light - dark) * t;
+    const v = Math.round(Math.pow(L, 1 / 1.0) * 255);
+    out.push(rgbToHex([v, v, v]));
+  }
+  return out;
+}
+
+// Diferencias de luminosidad (L*) entre colores: impresión en grises
+export function grayDiagnostics(colors) {
+  const L = colors.map((c) => rgbToLab(hexToRgb(c))[0]);
+  let min = Infinity, pair = null;
+  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) { const d = Math.abs(L[i] - L[j]); if (d < min) { min = d; pair = [i, j]; } }
+  return { L, minDeltaL: Number.isFinite(min) ? min : null, pair };
 }

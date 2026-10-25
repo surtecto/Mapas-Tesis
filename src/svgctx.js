@@ -171,7 +171,9 @@ export class SvgCtx {
   }
   endGroup() { this.parts.push('</g>'); }
 
-  toString(widthMM, heightMM, title = '') {
-    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${f(widthMM)}mm" height="${f(heightMM)}mm" viewBox="0 0 ${f(this.width)} ${f(this.height)}">\n<title>${escapeXml(title)}</title>\n<defs>${this.defs.join('')}</defs>\n${this.parts.join('\n')}\n</svg>`;
+  toString(widthMM, heightMM, title = '', { gray = false } = {}) {
+    const defs = this.defs.join('') + (gray ? '<filter id="escala-de-grises"><feColorMatrix type="saturate" values="0"/></filter>' : '');
+    const body = gray ? `<g id="figura" filter="url(#escala-de-grises)">\n${this.parts.join('\n')}\n</g>` : this.parts.join('\n');
+    return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${f(widthMM)}mm" height="${f(heightMM)}mm" viewBox="0 0 ${f(this.width)} ${f(this.height)}">\n<title>${escapeXml(title)}</title>\n<defs>${defs}</defs>\n${body}\n</svg>`;
   }
 }

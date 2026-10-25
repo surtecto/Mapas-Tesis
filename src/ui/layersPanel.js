@@ -13,6 +13,9 @@ const CLIPS = [['none', 'Sin recorte'], ['land', 'Solo sobre tierra y hielo (seg
 
 function typeBadge(def, ls) {
   if (ls.def === 'user') return 'Propia';
+  if (def.type === 'georef') return 'Plano';
+  if (def.type === 'interp') return ls.params && ls.params.ghost ? 'Compara' : 'Interpr.';
+  if (def.type === 'wfs-view') return 'IGN';
   if (def.type === 'wfs') return 'WFS';
   if (def.type === 'wms') return 'WMS';
   if (def.type === 'esri-feature') return 'Vector';
@@ -81,7 +84,7 @@ function layerRow(app, ls) {
   li.append(el('div', { class: 'layer-head' },
     el('span', { class: 'drag', title: 'Arrastrar para reordenar', 'aria-hidden': 'true', draggable: 'true' }),
     vis, nameBtn,
-    status ? el('span', { class: `badge ${status.kind}`, title: status.text }, status.kind === 'error' ? '!' : '…') : el('span', { class: 'badge' }, typeBadge(def, ls)),
+    status ? el('span', { class: `badge ${status.kind}`, title: status.text }, status.kind === 'error' ? '!' : status.kind === 'far' ? 'acercá' : '…') : el('span', { class: 'badge' }, typeBadge(def, ls)),
     op, rm));
   if (open) li.append(layerBody(app, ls, def));
   return li;
@@ -94,6 +97,16 @@ function layerBody(app, ls, def) {
   body.append(field('Nombre', text(ls, 'name', { onChange: () => { if (ls.legend) ls.legend.label = ls.legend.label || ls.name; app.renderLeft(); app.commit('overlay'); } })));
   body.append(inlineFields(field('Opacidad', range(ls, 'opacity', { onInput: () => app.applyOpacity(ls), onChange: () => app.commit('layers'), format: (v) => `${Math.round(v * 100)}%` }))));
 
+  if (def.type === 'georef' || def.type === 'interp') {
+    body.append(el('p', { class: 'note' }, def.type === 'georef' ? 'Plano histórico o ajeno georreferenciado. Sus puntos de control, el recorte y el tratamiento de la imagen se editan en la pestaña Interpretación.' : 'Trazos de la versión de interpretación. Se dibujan y se editan en la pestaña Interpretación.'),
+      el('div', { class: 'btn-row' }, button('Ir a Interpretación', () => app.showTab('interp'), { kind: 'small' })));
+    if (def.type === 'georef') body.append(field('Modo de fusión', select(ls, 'blend', BLENDS, { onChange: () => app.commit('layers') })));
+    return body;
+  }
+  if (def.type === 'wfs-view') {
+    body.append(el('p', { class: 'note' }, `Se pide al IGN solo lo que entra en la vista, a escalas mayores que 1:${(def.maxMpm * 1000).toLocaleString('es-AR')}. ${ls.params && ls.params.force ? 'Carga forzada a escala menor (puede tardar).' : ''}`));
+    body.append(check(ls.params, 'force', 'Cargar también a escala menor (más lento)', { onChange: () => { ls.rev += 1; app.commit('layers'); } }));
+  }
   if (def.type === 'graticule') body.append(graticuleEditor(app, ls));
   else if (def.kind === 'vector') {
     if (ls.style) body.append(styleEditor(app, ls));
@@ -205,11 +218,12 @@ function catalogView(app) {
   const present = new Set(app.state.layers.map((l) => l.def));
   const proj = projInfo(app.state.projection);
   for (const g of GROUPS) {
+    if (g.hidden) continue;
     const items = CATALOG.filter((d) => d.group === g.id);
     const list = el('ul', { class: 'catalog-list' });
     for (const d of items) {
       const inMap = present.has(d.id);
-      const warn = d.projection === 'EPSG:3857' && proj.polar ? 'Teselas Mercator: sin datos al sur de 85°S.' : '';
+      const warn = d.projection === 'EPSG:3857' && proj.polar && app.state.view.center[1] < -60 ? 'Teselas Mercator: sin datos al sur de 85°S.' : '';
       const add = el('button', { type: 'button', class: `btn small${inMap ? ' ghost' : ''}`, 'aria-label': `Agregar ${d.name}` }, inMap ? 'En el mapa' : 'Agregar');
       add.addEventListener('click', () => {
         const ls = newLayerState(d.id);
@@ -223,7 +237,7 @@ function catalogView(app) {
         el('div', { class: 'catalog-text' }, el('span', { class: 'catalog-name' }, d.name), d.note || warn ? el('span', { class: 'catalog-note' }, warn || d.note) : null),
         add));
     }
-    wrap.append(details(g.title, g.id === 'ign-vec', list));
+    wrap.append(details(g.title, g.id === 'ign-arg', list));
   }
   return wrap;
 }

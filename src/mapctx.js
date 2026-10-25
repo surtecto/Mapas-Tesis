@@ -125,6 +125,9 @@ export class MapCtx {
       const ins = this.inset();
       const o = ins && ins.layers ? ins.layers[ls.uid] : undefined;
       if (o === true || o === false) return o;
+      // los mapas de ubicación muestran solo las capas elegidas para ellos; los planos y trazos de interpretación, nunca por defecto
+      if (ins && ins.mode === 'context') return false;
+      if (ls.def === 'interp' || ls.def === 'georef') return !!ls.visible && ins.mode !== 'context';
       return !!ls.visible;
     }
     return !!ls.visible;

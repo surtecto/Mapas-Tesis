@@ -6,6 +6,7 @@ import { TEMPLATES } from '../templates.js';
 import { rotationForMeridian, projInfo } from '../projections.js';
 import { frameRect } from '../overlay.js';
 import { buildCaption } from '../caption.js';
+import { MEDIA, QUALITIES, getMedia, applyMediaPage, checkLegibility, fitToMedia, exportDpi, SIMULATIONS } from '../media.js';
 
 const TEXT_PRESETS = [
   { name: 'Título', t: { text: 'Título del mapa', size: 12, bold: true, align: 'center' } },
@@ -20,15 +21,63 @@ export function renderFigurePanel(app, root) {
   clear(root);
   const st = app.state;
   root.append(
-    details('Página y tamaño de la figura', true, pageEditor(app)),
+    details('Destino de la figura: dónde se va a ver', true, mediaEditor(app)),
+    details('Página y tamaño de la figura', false, pageEditor(app)),
     details('Vista del mapa', true, viewEditor(app)),
     details('Elementos', true, elementsEditor(app)),
     details(`Zooms y mapas de ubicación (${st.insets.length})`, true, insetsEditor(app)),
     details(`Textos (${st.texts.length})`, true, textsEditor(app)),
     details('Epígrafe y fuentes', false, captionEditor(app)),
-    details('Plantillas', false, templatesEditor(app)),
+    details('Modelos de ejemplo', false, templatesEditor(app)),
   );
 }
+
+function mediaEditor(app) {
+  const st = app.state;
+  const m = getMedia(st.media.profileId);
+  const groups = [...new Set(MEDIA.map((x) => x.group))];
+  const sel = el('select', {});
+  for (const g of groups) {
+    const og = el('optgroup', { label: g });
+    for (const x of MEDIA.filter((y) => y.group === g)) og.append(el('option', { value: x.id, selected: x.id === m.id }, x.name));
+    sel.append(og);
+  }
+  sel.addEventListener('change', () => {
+    st.media.profileId = sel.value;
+    st.media.quality = 'estandar';
+    const nm = getMedia(sel.value);
+    applyMediaPage(st, nm, { relayout: true });
+    app.commit('page'); app.commit('view'); app.buildInsets(); app.renderLeft(); app.keepInside();
+    app.toast(`Destino: ${nm.name}. La hoja ahora mide ${nm.page.w.toFixed(1).replace('.', ',')} × ${nm.page.h.toFixed(1).replace('.', ',')} mm; reacomodá los elementos si hace falta.`);
+  });
+  const dpi = exportDpi(st);
+  const px = [Math.round((st.page.widthMM / 25.4) * dpi), Math.round((st.page.heightMM / 25.4) * dpi)];
+  const q = select(st.media, 'quality', (QUALITIES[m.kind] || []).map((x) => [x[0], x[1]]), { onChange: () => app.renderLeft() });
+  const res = checkLegibility(st);
+  const issues = el('ul', { class: 'legib' });
+  res.issues.slice(0, 12).forEach((i) => issues.append(el('li', { class: i.level }, el('strong', {}, i.what), ': ', i.msg)));
+  const sizeOk = Math.abs(st.page.widthMM - m.page.w) < 0.5 && Math.abs(st.page.heightMM - m.page.h) < 0.5;
+  return el('div', {},
+    field('Destino', sel),
+    m.notes ? el('p', { class: 'note' }, m.notes) : null,
+    inlineFields(field('Calidad', q), el('div', { class: 'field' }, el('span', { class: 'label-spacer' }), el('span', { class: 'media-px' }, `${px[0]} × ${px[1]} px · ${String(Math.round(dpi * 10) / 10).replace('.', ',')} ppp`))),
+    !sizeOk ? el('div', { class: 'btn-row' }, el('span', { class: 'hint' }, `La hoja (${fmt(st.page.widthMM)} × ${fmt(st.page.heightMM)} mm) no es la del destino.`), button('Usar el tamaño del destino', () => { applyMediaPage(st, m, { relayout: true }); app.commit('page'); app.commit('view'); app.buildInsets(); app.renderLeft(); app.keepInside(); }, { kind: 'small' })) : null,
+    el('h3', { class: 'sub-h' }, res.issues.length ? `Legibilidad: ${res.issues.length} ${res.issues.length === 1 ? 'aviso' : 'avisos'}` : 'Legibilidad: todo dentro de los mínimos'),
+    res.issues.length ? issues : el('p', { class: 'ok-note' }, m.kind === 'print' ? `Textos ≥ ${fmt(res.minText)} pt, líneas ≥ ${fmt(res.minLine)} pt.` : `Textos ≥ ${m.min.textPx} px, líneas ≥ ${m.min.linePx} px.`),
+    res.issues.length ? el('div', { class: 'btn-row' }, button('Ajustar al destino', () => {
+      fitToMedia(st);
+      app.refreshAll();
+      app.keepInside();
+      app.toast('Ajustado: lo más chico llega al mínimo del destino y lo demás crece en proporción, conservando la jerarquía. Revisá que la leyenda siga entrando.');
+    }, { kind: 'small primary' })) : null,
+    el('h3', { class: 'sub-h' }, 'Color y simulación'),
+    inlineFields(
+      field('Salida', select(st.render, 'colorMode', [['color', 'Color'], ['grises', 'Escala de grises']], { onChange: () => { app.applyPreviewFilter(); app.renderLeft(); } })),
+      field('Ver como…', select(st.render, 'simulate', SIMULATIONS, { onChange: () => app.applyPreviewFilter() }))),
+    st.render.colorMode === 'grises' ? el('p', { class: 'note' }, 'La exportación sale en grises (PNG, TIFF y PDF en escala de grises). Para que las categorías se distingan sin color, el estilo «Blanco y negro para imprimir» usa tramas y luminosidades separadas.') : null,
+  );
+}
+function fmt(v) { return (Math.round(v * 100) / 100).toString().replace('.', ','); }
 
 function pageEditor(app) {
   const p = app.state.page;
@@ -82,7 +131,9 @@ function viewEditor(app) {
       button('Norte de la península', () => { app.flyTo([-58, -63.6], 2600); }, { kind: 'small' }),
       button('Sector Antártico', () => { app.flyTo([-50, -72], 16000); }, { kind: 'small' }),
       button('Antártida completa', () => { app.flyTo([0, -90], 30000, 0); }, { kind: 'small' }),
-      button('Argentina bicontinental', () => { app.flyTo([-58, -55], 40000, 0); }, { kind: 'small' })),
+      button('Argentina bicontinental', () => { app.flyTo([-58, -55], 40000, 0); }, { kind: 'small' }),
+      button('Pago Gilense', () => { app.flyTo([-59.47, -34.435], 330, 0); }, { kind: 'small' }),
+      button('Provincia de Buenos Aires', () => { app.flyTo([-60.5, -37], 4200, 0); }, { kind: 'small' })),
   );
 }
 

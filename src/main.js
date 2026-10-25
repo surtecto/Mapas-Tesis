@@ -1,9 +1,21 @@
-// Coni-Mapas: generador de mapas de localización para investigación antártica
+// Mapas-Tesis: generador de mapas para tesis e investigación (deriva de Coni-Mapas)
+import Draw from 'ol/interaction/Draw.js';
+import Modify from 'ol/interaction/Modify.js';
+import VectorSource from 'ol/source/Vector.js';
+import GeoJSON from 'ol/format/GeoJSON.js';
+import { transformExtent } from 'ol/proj.js';
 import { MapCtx } from './mapctx.js';
 import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom } from './projections.js';
 import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, insetOutline, textPosition } from './overlay.js';
 import { History, normalizeState, saveLocal, loadLocal, serializeState } from './state.js';
-import { TEMPLATES, templateConi } from './templates.js';
+import { TEMPLATES, templateGiles } from './templates.js';
+import { renderThesisPanel } from './ui/thesisPanel.js';
+import { renderInterpPanel } from './ui/interpPanel.js';
+import { setupSearch } from './ui/search.js';
+import { simulationFilter } from './media.js';
+import { getImage, exportImages, importImages } from './imagestore.js';
+import { activeVersion, isLocked, addFeature, removeFeature, interpLayer, ensureInterpLayer, bumpInterp } from './interp.js';
+import { getDef } from './catalog.js';
 import { renderLayersPanel } from './ui/layersPanel.js';
 import { renderSitesPanel } from './ui/sitesPanel.js';
 import { renderFigurePanel } from './ui/figurePanel.js';
@@ -16,7 +28,7 @@ import { el, clear, debounce, rafThrottle, uid, formatDMS, fmtInt, roundScale, d
 
 class App {
   constructor() {
-    this.ui = { expanded: new Set(), expandedSites: new Set(), tab: 'capas', previewZoom: 1 };
+    this.ui = { expanded: new Set(), expandedSites: new Set(), tab: 'tesis', previewZoom: 1 };
     this.selection = null;
     this.mode = null;
     this.modeDraft = null;
@@ -35,7 +47,7 @@ class App {
   init() {
     registerProjections();
     const saved = loadLocal();
-    try { this.state = normalizeState(saved || templateConi()); } catch (e) { this.state = normalizeState(templateConi()); }
+    try { this.state = normalizeState(saved || templateGiles()); } catch (e) { console.error(e); this.state = normalizeState(templateGiles()); }
     this.$ = {
       stage: document.getElementById('stage'), pasteboard: document.getElementById('pasteboard'), paper: document.getElementById('paper'),
       mapMain: document.getElementById('map-main'), overlay: document.getElementById('overlay'), left: document.getElementById('left-body'),
@@ -57,7 +69,22 @@ class App {
     this.history.push(serializeState(this.state));
     new ResizeObserver(debounce(() => this.layout(), 60)).observe(this.$.pasteboard);
     window.coniApp = this;
-    if (!saved) setTimeout(() => this.toast('Proyecto de ejemplo cargado: sitios de muestreo de pingüinos. Podés cambiar todo o elegir otra plantilla en Figura › Plantillas.'), 900);
+    window.mapasTesis = this;
+    this.applyPreviewFilter();
+    this.preloadImages();
+    if (!saved) setTimeout(() => this.toast('Modelo de ejemplo cargado: Pago Gilense. En la pestaña Tesis podés escribir tu tema, interpretarlo y elegir otros modelos.'), 900);
+  }
+
+  // Imágenes de planos y del modelo de referencia (IndexedDB): se cargan en memoria y se redibujan las capas
+  async preloadImages() {
+    const keys = new Set(this.state.interp.sources.map((s) => s.key).filter(Boolean));
+    if (this.state.modelRef && this.state.modelRef.key) keys.add(this.state.modelRef.key);
+    let missing = 0;
+    for (const k of keys) { try { if (!(await getImage(k))) missing++; } catch (e) { missing++; } }
+    for (const l of this.state.layers) if (l.def === 'georef') l.rev += 1;
+    this.commit('layers', { history: false });
+    this.updateModelRef();
+    if (missing) this.toast(`Faltan ${missing} imagen(es) de planos en este navegador: abrí el proyecto guardado (.json) que las incluye o volvé a cargarlas.`, 'warn');
   }
 
   // ---------- geometría de la vista previa ----------
@@ -90,6 +117,7 @@ class App {
     c.style.height = `${p.heightMM * s}px`;
     this.redraw();
     this.updateStatusSoon();
+    this.applyPreviewFilter();
   }
 
   layoutInsets() {
@@ -227,7 +255,17 @@ class App {
     if (history) { this.scheduleHistory(); this.scheduleSave(); }
   }
 
+  refreshAll() {
+    this.layout();
+    this.commit('layers');
+    this.buildInsets();
+    this.renderLeft();
+    this.renderInspector();
+    this.applyPreviewFilter();
+  }
+
   applyState() {
+    this.stopDraw && this.stopDraw(true);
     for (const v of this.insetViews.values()) { v.ctx.dispose(); v.el.remove(); }
     this.insetViews.clear();
     this.selection = null;
@@ -240,17 +278,149 @@ class App {
     this.$.projection.value = this.state.projection;
     this.renderLeft();
     this.renderInspector();
+    this.applyPreviewFilter();
+    this.updateModelRef();
     this.redraw();
   }
 
-  loadTemplate(id) {
+  async loadTemplate(id) {
     const t = TEMPLATES.find((x) => x.id === id);
     if (!t) return;
+    if (t.build.after) {
+      try { await t.build.after(this); } catch (err) { this.toast(`No se pudo preparar el modelo: ${err.message}`, 'error'); }
+    }
     this.state = normalizeState(t.build());
     this.applyState();
     this.history.push(serializeState(this.state));
     this.scheduleSave();
-    this.toast(`Plantilla cargada: ${t.name}`);
+    this.preloadImages();
+    this.toast(`Modelo cargado: ${t.name}`);
+  }
+
+  // Corre leyenda, norte y escala hacia adentro del marco si quedaron afuera (y reparte la leyenda en columnas si es muy alta)
+  keepInside(depth = 0) {
+    if (depth > 4) return;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const st = this.state;
+      const f = frameRect(st);
+      let changed = false;
+      for (const h of this.hits) {
+        if (!['legend', 'north', 'scale'].includes(h.kind) || !h.poly) continue;
+        const xs = h.poly.map((p) => p[0]), ys = h.poly.map((p) => p[1]);
+        const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+        const o = h.kind === 'legend' ? st.legend : h.kind === 'north' ? st.north : st.scalebar;
+        if (h.kind === 'legend' && y1 - y0 > f.h * 0.92 && (st.legend.columns || 1) < 3) { st.legend.columns = (st.legend.columns || 1) + 1; changed = true; continue; }
+        let dx = 0, dy = 0;
+        if (x1 > f.x + f.w - 1) dx = f.x + f.w - 1 - x1;
+        if (x0 + dx < f.x + 1) dx = f.x + 1 - x0;
+        if (y1 > f.y + f.h - 1) dy = f.y + f.h - 1 - y1;
+        if (y0 + dy < f.y + 1) dy = f.y + 1 - y0;
+        if (Math.abs(dx) > 0.05 || Math.abs(dy) > 0.05) { o.x = Math.round((o.x + dx) * 10) / 10; o.y = Math.round((o.y + dy) * 10) / 10; changed = true; }
+      }
+      if (changed) { this.commit('overlay'); this.keepInside(depth + 1); }
+    }));
+  }
+
+  // ---------- utilidades para los paneles ----------
+  frameSize() { return frameRect(this.state); }
+  viewBBoxLL() {
+    const m = this.mainCtx.map;
+    const ext = m.getView().calculateExtent(m.getSize());
+    const ll = transformExtent(ext, this.mainCtx.projection, 'EPSG:4326', 16);
+    return [Math.max(-180, ll[0]), Math.max(-85, ll[1]), Math.min(180, ll[2]), Math.min(85, ll[3])];
+  }
+  setProjection(code) {
+    this.state.projection = code;
+    if (code === 'EPSG:3031' || code === 'EPSG:6932') this.state.view.rotation = rotationForMeridian(code, this.state.view.center[0], this.state.view.center[1]);
+    else this.state.view.rotation = 0;
+    this.mainCtx.projection = '';
+    this.$.projection.value = code;
+    this.commit('projection');
+    this.toast(projInfo(code).detail);
+  }
+  addSiteAt(name, lon, lat) {
+    const s = { id: uid('S'), name: name || `Sitio ${this.state.sites.length + 1}`, lon, lat, cats: [], label: { show: true }, note: '' };
+    this.state.sites.push(s);
+    this.commit('sites');
+    this.renderLeft();
+    this.toast(`Sitio agregado: ${s.name}`);
+  }
+  applyPreviewFilter() {
+    if (!this.$ || !this.$.paper) return;
+    const f = simulationFilter(this.state, this.pxPerMm || 1);
+    this.$.paper.style.filter = f || '';
+  }
+  async updateModelRef() {
+    const mr = this.state.modelRef || {};
+    let img = this.$.paper.querySelector('.model-ref-img');
+    if (!mr.key || !mr.show) { if (img) img.remove(); return; }
+    const v = await getImage(mr.key);
+    if (!v) return;
+    if (!img) { img = el('img', { class: 'model-ref-img', alt: '' }); this.$.paper.insertBefore(img, this.$.overlay); }
+    if (img.getAttribute('src') !== v.url) img.src = v.url;
+    img.style.opacity = String(mr.opacity == null ? 0.45 : mr.opacity);
+  }
+
+  // ---------- dibujo de interpretación ----------
+  startDraw() {
+    this.stopDraw(true);
+    if (isLocked(this.state)) { this.toast('La versión activa está fijada: duplicala para dibujar.', 'warn'); return; }
+    const it = this.state.interp;
+    const cat = it.categories.find((c) => c.id === it.drawCat) || it.categories[0];
+    ensureInterpLayer(this);
+    this.commit('layers', { history: false });
+    const type = cat.geom === 'point' ? 'Point' : cat.geom === 'line' ? 'LineString' : 'Polygon';
+    const tmp = new VectorSource();
+    const draw = new Draw({ source: tmp, type, stopClick: true });
+    const fmt = new GeoJSON();
+    draw.on('drawend', (e) => {
+      const g = fmt.writeGeometryObject(e.feature.getGeometry(), { dataProjection: 'EPSG:4326', featureProjection: this.mainCtx.projection, decimals: 7 });
+      const f = addFeature(this.state, g, { cat: cat.id, cert: it.drawCert });
+      setTimeout(() => { tmp.clear(); bumpInterp(this); this.select({ kind: 'interp', id: f.id }); if (this.ui.tab === 'interp') this.renderLeft(); }, 0);
+    });
+    this.mainCtx.map.addInteraction(draw);
+    this._draw = draw;
+    this.mode = 'draw';
+    this.$.paper.classList.add('mode-draw');
+    this.toast(cat.geom === 'point' ? `Dibujando «${cat.name}»: tocá el mapa. Esc termina.` : `Dibujando «${cat.name}»: tocá para agregar vértices y doble toque para cerrar. Esc termina.`);
+  }
+  startModify() {
+    this.stopDraw(true);
+    if (isLocked(this.state)) { this.toast('La versión activa está fijada.', 'warn'); return; }
+    const ls = interpLayer(this.state, false);
+    const layer = ls && this.mainCtx.olLayers.get(ls.uid);
+    if (!layer || !layer._interpSource) { this.toast('No hay trazos para editar en esta versión.'); return; }
+    const mod = new Modify({ source: layer._interpSource });
+    const fmt = new GeoJSON();
+    mod.on('modifyend', (e) => {
+      const v = activeVersion(this.state);
+      e.features.forEach((f) => {
+        const rec = v.features.features.find((x) => x.id === f.getId());
+        if (rec) rec.geometry = fmt.writeGeometryObject(f.getGeometry(), { dataProjection: 'EPSG:4326', featureProjection: this.mainCtx.projection, decimals: 7 });
+      });
+      this.redraw(); this.scheduleHistory(); this.scheduleSave();
+    });
+    this.mainCtx.map.addInteraction(mod);
+    this._draw = mod;
+    this.mode = 'modify';
+    this.$.paper.classList.add('mode-draw');
+    this.toast('Arrastrá los vértices de los trazos. Esc termina.');
+  }
+  stopDraw(silent) {
+    if (this._draw) { this.mainCtx.map.removeInteraction(this._draw); this._draw = null; }
+    const was = this.mode === 'draw' || this.mode === 'modify';
+    if (was) { this.mode = null; this.$.paper.classList.remove('mode-draw'); }
+    if (was && !silent && this.ui.tab === 'interp') this.renderLeft();
+    if (was && this.mode === null) bumpInterp(this);
+  }
+  interpFeatureAt(e) {
+    const ls = interpLayer(this.state, false);
+    const layer = ls && this.mainCtx.olLayers.get(ls.uid);
+    if (!layer) return null;
+    const px = this.mainCtx.map.getEventPixel(e);
+    let id = null;
+    this.mainCtx.map.forEachFeatureAtPixel(px, (f) => { id = f.getId(); return true; }, { layerFilter: (l) => l === layer, hitTolerance: 5 });
+    return id;
   }
 
   // Prueba de exportación en memoria (no descarga nada): devuelve tamaño, peso y teselas fallidas
@@ -326,19 +496,29 @@ class App {
 
   // ---------- avisos ----------
   onLayerError(ls, err) {
-    const prev = this.layerErrors.get(ls.uid);
     const msg = err && err.message ? err.message : String(err);
     this.layerErrors.set(ls.uid, msg);
-    if (!prev || Date.now() - (this._lastErrToast || 0) > 20000) {
+    // los errores de varias capas se agrupan en un solo aviso
+    this._errBatch = this._errBatch || new Map();
+    this._errBatch.set(ls.uid, { name: ls.name, msg });
+    clearTimeout(this._errTimer);
+    this._errTimer = setTimeout(() => {
+      const items = [...this._errBatch.values()];
+      this._errBatch.clear();
+      if (!items.length || Date.now() - (this._lastErrToast || 0) < 15000) return;
       this._lastErrToast = Date.now();
-      this.toast(`No se pudo cargar «${ls.name}»: ${msg}. Revisá la conexión o probá más tarde.`, 'error');
-    }
+      const names = items.map((x) => `«${x.name}»`);
+      const text = items.length === 1 ? `No se pudo cargar ${names[0]}: ${items[0].msg}.` : `No se pudieron cargar ${items.length} capas (${names.slice(0, 4).join(', ')}${items.length > 4 ? '…' : ''}): ${items[0].msg}.`;
+      this.toast(`${text} Revisá la conexión o probá más tarde.`, 'error');
+    }, 1200);
     this.renderLeftSoon();
   }
   onTileError() { this._tileErrors = (this._tileErrors || 0) + 1; this.updateStatusSoon(); }
   onTileLoad(d) { this.loading = Math.max(0, this.loading + d); this.updateStatusSoon(); }
   layerStatus(uid) {
     if (this.layerErrors.has(uid)) return { kind: 'error', text: this.layerErrors.get(uid) };
+    const l = this.mainCtx && this.mainCtx.olLayers.get(uid);
+    if (l && l._viewSource && l._viewSource._tooFar) return { kind: 'far', text: 'Esta capa se carga al acercar el mapa (o activá «Cargar también a escala menor»).' };
     return null;
   }
 
@@ -351,6 +531,7 @@ class App {
 
   // ---------- paneles ----------
   showTab(name) {
+    if (this.ui.tab === 'interp' && name !== 'interp' && (this.mode === 'draw' || this.mode === 'modify')) this.stopDraw(true);
     this.ui.tab = name;
     document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
     this.renderLeft();
@@ -358,8 +539,10 @@ class App {
   renderLeft() {
     const root = this.$.left;
     const scroll = root.scrollTop;
-    if (this.ui.tab === 'capas') renderLayersPanel(this, root);
+    if (this.ui.tab === 'tesis') renderThesisPanel(this, root);
+    else if (this.ui.tab === 'capas') renderLayersPanel(this, root);
     else if (this.ui.tab === 'sitios') renderSitesPanel(this, root);
+    else if (this.ui.tab === 'interp') renderInterpPanel(this, root);
     else renderFigurePanel(this, root);
     root.scrollTop = scroll;
   }
@@ -382,19 +565,15 @@ class App {
   // ---------- controles generales ----------
   setupChrome() {
     const projSel = this.$.projection;
-    for (const p of PROJECTIONS) projSel.append(el('option', { value: p.code }, p.name));
+    const order = ['Argentina (POSGAR 2007)', 'Antártida y bicontinental', 'UTM', 'Históricas', 'Mundiales'];
+    for (const g of order) {
+      const og = el('optgroup', { label: g });
+      for (const p of PROJECTIONS.filter((x) => x.group === g && x.list !== false)) og.append(el('option', { value: p.code }, p.name));
+      projSel.append(og);
+    }
     projSel.value = this.state.projection;
-    projSel.addEventListener('change', () => {
-      const code = projSel.value;
-      this.state.projection = code;
-      const info = projInfo(code);
-      if (code === 'EPSG:3031' || code === 'EPSG:6932') this.state.view.rotation = rotationForMeridian(code, this.state.view.center[0], this.state.view.center[1]);
-      else this.state.view.rotation = 0;
-      this.mainCtx.projection = '';
-      this.commit('projection');
-      this.renderLeft();
-      this.toast(info.detail);
-    });
+    projSel.addEventListener('change', () => { this.setProjection(projSel.value); this.renderLeft(); });
+    setupSearch(this);
     this.$.title.value = this.state.title;
     this.$.title.addEventListener('change', () => { this.state.title = this.$.title.value; this.commit('overlay'); });
     document.getElementById('btn-undo').addEventListener('click', () => this.undo());
@@ -411,10 +590,14 @@ class App {
     const menu = document.getElementById('project-menu');
     menuBtn.addEventListener('click', () => { const open = menu.hasAttribute('hidden'); menu.toggleAttribute('hidden', !open); menuBtn.setAttribute('aria-expanded', String(open)); });
     document.addEventListener('click', (e) => { if (!menu.contains(e.target) && e.target !== menuBtn) { menu.setAttribute('hidden', ''); menuBtn.setAttribute('aria-expanded', 'false'); } });
-    menu.querySelector('[data-act="save"]').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(JSON.parse(serializeState(this.state)), null, 1)], { type: 'application/json' });
-      downloadBlob(blob, `${(this.state.title || 'proyecto').replace(/[^\wáéíóúñ-]+/gi, '-').slice(0, 50)}.coni.json`);
+    menu.querySelector('[data-act="save"]').addEventListener('click', async () => {
       menu.setAttribute('hidden', '');
+      const data = JSON.parse(serializeState(this.state));
+      const keys = new Set(this.state.interp.sources.map((x) => x.key).filter(Boolean));
+      if (this.state.modelRef && this.state.modelRef.key) keys.add(this.state.modelRef.key);
+      if (keys.size) { this.toast('Incluyendo las imágenes de los planos en el archivo…'); data.images = await exportImages([...keys]); }
+      const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' });
+      downloadBlob(blob, `${(this.state.title || 'proyecto').replace(/[^\wáéíóúñ-]+/gi, '-').slice(0, 50)}.tesis.json`);
     });
     const openInput = document.getElementById('open-project');
     menu.querySelector('[data-act="open"]').addEventListener('click', () => { openInput.click(); menu.setAttribute('hidden', ''); });
@@ -422,9 +605,12 @@ class App {
       const f = openInput.files[0];
       if (!f) return;
       try {
-        this.state = normalizeState(JSON.parse(await readFileAs(f, 'text')));
+        const obj = JSON.parse(await readFileAs(f, 'text'));
+        if (obj.images) { await importImages(obj.images); delete obj.images; }
+        this.state = normalizeState(obj);
         this.applyState();
         this.history.push(serializeState(this.state));
+        this.preloadImages();
         this.toast(`Proyecto abierto: ${this.state.title}`);
       } catch (err) { this.toast(`No se pudo abrir el proyecto: ${err.message}`, 'error'); }
       openInput.value = '';
@@ -441,7 +627,8 @@ class App {
       downloadBlob(new Blob(['﻿' + csv], { type: 'text/csv' }), 'sitios.csv');
       menu.setAttribute('hidden', '');
     });
-    menu.querySelectorAll('[data-tpl]').forEach((b) => b.addEventListener('click', () => { this.loadTemplate(b.dataset.tpl); menu.setAttribute('hidden', ''); }));
+    const tplBox = menu.querySelector('[data-templates]');
+    if (tplBox) for (const t of TEMPLATES) tplBox.append(el('button', { type: 'button', role: 'menuitem', onclick: () => { this.loadTemplate(t.id); menu.setAttribute('hidden', ''); } }, t.name));
     // Paneles en pantallas angostas
     document.querySelectorAll('[data-toggle-panel]').forEach((b) => b.addEventListener('click', () => {
       document.body.classList.toggle(`show-${b.dataset.togglePanel}`);
@@ -480,6 +667,7 @@ class App {
     let drag = null;
     paper.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      if (this.mode === 'draw' || this.mode === 'modify') return; // OpenLayers dibuja
       const pt = this.pointerMM(e);
       if (this.mode === 'add-site') {
         const { scope } = this.scopeAt(pt);
@@ -577,7 +765,11 @@ class App {
       const d = drag;
       drag = null;
       if (d.kind === 'map') {
-        if (!d.moved && this.selection) this.select(null);
+        if (!d.moved) {
+          const fid = this.interpFeatureAt(e);
+          if (fid) { this.select({ kind: 'interp', id: fid }); if (this.ui.tab === 'interp') this.renderLeft(); }
+          else if (this.selection) this.select(null);
+        }
         return;
       }
       try { paper.releasePointerCapture(d.pointerId); } catch (err) { /* noop */ }
@@ -636,12 +828,17 @@ class App {
       if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) this.redo(); else this.undo(); return; }
       if ((e.ctrlKey || e.metaKey) && !typing && e.key.toLowerCase() === 'y') { e.preventDefault(); this.redo(); return; }
       if (typing) return;
-      if (e.key === 'Escape') { if (this.mode) { this.setMode(null); this.renderLeft(); } else this.select(null); return; }
+      if (e.key === 'Escape') {
+        if (this.mode === 'draw' || this.mode === 'modify') { if (this._draw && this._draw.abortDrawing) this._draw.abortDrawing(); this.stopDraw(); return; }
+        if (this.mode) { this.setMode(null); this.renderLeft(); } else this.select(null);
+        return;
+      }
       const sel = this.selection;
       if (!sel) return;
       const st = this.state;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
+        if (sel.kind === 'interp') { if (!isLocked(st)) { removeFeature(st, sel.id); this.select(null); bumpInterp(this); this.renderLeft(); } return; }
         if (sel.kind === 'text') st.texts = st.texts.filter((t) => t.id !== sel.id);
         else if (sel.kind === 'inset') st.insets = st.insets.filter((t) => t.id !== sel.id);
         else if (sel.kind === 'site') st.sites = st.sites.filter((t) => t.id !== sel.id);

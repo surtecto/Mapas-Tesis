@@ -25,6 +25,14 @@ export function dashCap(name) { return name === 'dotted' || name === 'dashdot' |
 
 export const PATTERNS = [
   ['none', 'Sin trama'], ['diag', 'Diagonal ／'], ['diag2', 'Diagonal ＼'], ['cross', 'Cruzada ✕'], ['horiz', 'Horizontal'], ['vert', 'Vertical'], ['grid', 'Cuadrícula'], ['dots', 'Puntos'],
+  ['stipple', 'Punteado irregular (arenas, médanos)'], ['dash-h', 'Rayas cortas (agua, bajos)'], ['wave', 'Ondas (agua)'], ['marsh', 'Bañado (matas)'],
+  ['grass', 'Pastizal'], ['rows', 'Surcos (cultivo)'], ['brick', 'Ladrillo (construido)'], ['triangles', 'Triángulos (monte)'],
+];
+
+export const DECOS = [
+  ['none', 'Sin decoración'], ['casing', 'Con borde (calle, ruta)'], ['double', 'Doble línea'], ['rail', 'Ferrocarril (tramos alternados)'],
+  ['ties', 'Ferrocarril (durmientes)'], ['ticks', 'Peine a un lado (barranca, frente)'], ['ticks2', 'Peine a ambos lados'], ['teeth', 'Dientes (frontera, frente de avance)'],
+  ['arrows', 'Flechas de sentido (recorrido, flujo)'], ['circles', 'Postes (telégrafo, alambrado)'], ['crosses', 'Cruces (límite, alambrado)'],
 ];
 
 // ---------- símbolos ----------
@@ -130,7 +138,7 @@ export function drawSymbol(ctx, x, y, cfg, pxPerPt) {
 const patternCache = new Map();
 export function getPattern(kind, color, spacingPx, lineWidthPx) {
   if (!kind || kind === 'none') return null;
-  const s = Math.max(3, Math.round(spacingPx));
+  const s = Math.max(['marsh', 'grass', 'triangles', 'brick', 'wave', 'stipple'].includes(kind) ? 7 : 3, Math.round(spacingPx));
   const lw = Math.max(0.5, lineWidthPx);
   const key = `${kind}|${color}|${s}|${lw.toFixed(2)}`;
   if (patternCache.has(key)) return patternCache.get(key);
@@ -144,9 +152,105 @@ export function getPattern(kind, color, spacingPx, lineWidthPx) {
   if (kind === 'horiz' || kind === 'grid') line(0, s / 2, s, s / 2);
   if (kind === 'vert' || kind === 'grid') line(s / 2, 0, s / 2, s);
   if (kind === 'dots') { x.beginPath(); x.arc(s / 2, s / 2, lw * 1.1, 0, Math.PI * 2); x.fill(); }
+  if (kind === 'stipple') {
+    // posiciones fijas pseudoaleatorias (reproducibles en cada exportación)
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (let i = 0; i < 5; i++) { x.beginPath(); x.arc(rnd() * s, rnd() * s, lw * (0.7 + rnd() * 0.6), 0, Math.PI * 2); x.fill(); }
+  }
+  if (kind === 'dash-h') { line(s * 0.1, s * 0.3, s * 0.45, s * 0.3); line(s * 0.6, s * 0.8, s * 0.95, s * 0.8); }
+  if (kind === 'wave') {
+    x.beginPath();
+    for (let i = 0; i <= 12; i++) { const px = (i / 12) * s, py = s * 0.5 + Math.sin((i / 12) * Math.PI * 2) * s * 0.14; if (i === 0) x.moveTo(px, py); else x.lineTo(px, py); }
+    x.stroke();
+  }
+  if (kind === 'marsh') {
+    // mata de juncos sobre una línea corta: símbolo cartográfico clásico de bañado
+    const bx = s * 0.5, by = s * 0.62, w = s * 0.42;
+    line(bx - w / 2, by, bx + w / 2, by);
+    line(bx, by, bx, by - s * 0.3); line(bx - w * 0.28, by, bx - w * 0.4, by - s * 0.2); line(bx + w * 0.28, by, bx + w * 0.4, by - s * 0.2);
+  }
+  if (kind === 'grass') { const bx = s * 0.3, by = s * 0.4; line(bx - s * 0.08, by - s * 0.12, bx, by); line(bx, by, bx + s * 0.08, by - s * 0.12); const cx = s * 0.75, cy = s * 0.88; line(cx - s * 0.08, cy - s * 0.12, cx, cy); line(cx, cy, cx + s * 0.08, cy - s * 0.12); }
+  if (kind === 'rows') { for (let i = 0; i < 3; i++) { x.beginPath(); x.arc((i + 0.5) * (s / 3), s / 2, lw * 0.9, 0, Math.PI * 2); x.fill(); } }
+  if (kind === 'brick') { line(0, s * 0.25, s, s * 0.25); line(0, s * 0.75, s, s * 0.75); line(s * 0.25, s * 0.25, s * 0.25, s * 0.75); line(s * 0.75, 0, s * 0.75, s * 0.25); line(s * 0.75, s * 0.75, s * 0.75, s); }
+  if (kind === 'triangles') { x.beginPath(); x.moveTo(s * 0.5, s * 0.25); x.lineTo(s * 0.72, s * 0.7); x.lineTo(s * 0.28, s * 0.7); x.closePath(); x.stroke(); }
   const pat = x.createPattern(c, 'repeat');
   patternCache.set(key, pat);
   return pat;
+}
+
+
+// ---------- líneas decoradas ----------
+// Dibuja una polilínea (en píxeles del lienzo) con su decoración. l: estilo de línea; k: px por punto tipográfico.
+// Se usa en el mapa (renderer de OpenLayers), en la leyenda y en la exportación SVG.
+export function drawDecoratedLine(ctx, pts, l, k, colorOverride) {
+  if (!pts || pts.length < 2) return;
+  const color = colorOverride || l.color;
+  const op = l.opacity == null ? 1 : l.opacity;
+  const w = Math.max(0.3, (l.width || 0.5) * k);
+  const deco = l.deco || 'none';
+  const dc = l.decoColor || (deco === 'double' || deco === 'rail' ? '#ffffff' : color);
+  const path = () => { ctx.beginPath(); pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); };
+  const stroke = (col, width, dash, cap = 'butt') => {
+    path();
+    ctx.strokeStyle = rgba(col, op); ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = dash && dash.length ? cap : 'round';
+    ctx.setLineDash(dash || []); ctx.stroke();
+  };
+  ctx.save();
+  if (deco === 'casing') { stroke(dc, w * 1.9); stroke(color, w); }
+  else if (deco === 'double') { stroke(color, w * 2.4); stroke(dc, w * 1.0); }
+  else if (deco === 'rail') { stroke(color, w * 1.7); stroke(dc, w * 0.85, [w * 4, w * 4]); }
+  else stroke(color, w, dashArray(l.dash || 'solid', w, k * 0.6), dashCap(l.dash || 'solid'));
+  ctx.setLineDash([]);
+  if (['ties', 'ticks', 'ticks2', 'teeth', 'arrows', 'circles', 'crosses'].includes(deco)) {
+    const spacing = Math.max(2, (l.decoSpacing || (deco === 'arrows' ? 9 : deco === 'circles' ? 4 : 2.6)) * k * 2.835);
+    const size = Math.max(1, (l.decoSize || (deco === 'ties' ? 1.6 : deco === 'arrows' ? 2.2 : 1.8)) * k * 2.835);
+    ctx.strokeStyle = rgba(dc, op); ctx.fillStyle = rgba(dc, op);
+    ctx.lineWidth = Math.max(0.5, w * (deco === 'ties' ? 0.9 : 0.75)); ctx.lineCap = 'butt';
+    walkLine(pts, spacing, spacing * 0.5, (x, y, a) => {
+      const nx = -Math.sin(a), ny = Math.cos(a), tx = Math.cos(a), ty = Math.sin(a);
+      ctx.beginPath();
+      if (deco === 'ties') { ctx.moveTo(x - nx * size, y - ny * size); ctx.lineTo(x + nx * size, y + ny * size); ctx.stroke(); }
+      else if (deco === 'ticks') { ctx.moveTo(x, y); ctx.lineTo(x + nx * size, y + ny * size); ctx.stroke(); }
+      else if (deco === 'ticks2') { ctx.moveTo(x - nx * size, y - ny * size); ctx.lineTo(x + nx * size, y + ny * size); ctx.stroke(); }
+      else if (deco === 'teeth') { ctx.moveTo(x - tx * size * 0.6, y - ty * size * 0.6); ctx.lineTo(x + nx * size, y + ny * size); ctx.lineTo(x + tx * size * 0.6, y + ty * size * 0.6); ctx.closePath(); ctx.fill(); }
+      else if (deco === 'arrows') { ctx.moveTo(x - tx * size + nx * size * 0.7, y - ty * size + ny * size * 0.7); ctx.lineTo(x, y); ctx.lineTo(x - tx * size - nx * size * 0.7, y - ty * size - ny * size * 0.7); ctx.lineWidth = Math.max(0.6, w * 0.9); ctx.stroke(); }
+      else if (deco === 'circles') { ctx.arc(x, y, size * 0.45, 0, Math.PI * 2); ctx.fill(); }
+      else if (deco === 'crosses') { const r = size * 0.55; ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r); ctx.moveTo(x - r, y + r); ctx.lineTo(x + r, y - r); ctx.stroke(); }
+    });
+  }
+  ctx.restore();
+}
+
+// Recorre una polilínea colocando marcas cada 'step' píxeles (callback con posición y ángulo)
+export function walkLine(pts, step, offset, cb) {
+  let next = offset;
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i];
+    const dx = b[0] - a[0], dy = b[1] - a[1];
+    const len = Math.hypot(dx, dy);
+    if (!len) continue;
+    const ang = Math.atan2(dy, dx);
+    while (next <= acc + len) {
+      const t = (next - acc) / len;
+      cb(a[0] + dx * t, a[1] + dy * t, ang);
+      next += step;
+    }
+    acc += len;
+  }
+}
+
+// Clasificación de un valor según el modo de la capa: valores únicos o rangos numéricos
+export function classify(cz, v) {
+  if (!cz || !cz.field || v === undefined || v === null || v === '') return undefined;
+  if (cz.mode === 'ranges') {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return undefined;
+    const r = (cz.ranges || []).find((x) => n >= Number(x.min) && n <= Number(x.max));
+    return r ? r.color : undefined;
+  }
+  return cz.values ? cz.values[v] : undefined;
 }
 
 // ---------- texto ----------
@@ -195,7 +299,7 @@ export function makeVectorStyleFn(getLayerState, def, ctx) {
     const pxPerPt = ctx.pxPerMm * PT_MM;
     const geomType = feature.getGeometry() ? feature.getGeometry().getType() : 'Point';
     const cat = st.categorize && st.categorize.field ? feature.get(st.categorize.field) : undefined;
-    const catColor = cat !== undefined && st.categorize.values ? st.categorize.values[cat] : undefined;
+    const catColor = classify(st.categorize, cat);
     if (st.categorize && st.categorize.field && st.categorize.hideOthers && catColor === undefined) return null;
     const lab = st.label || {};
     let text = '';
@@ -230,9 +334,19 @@ export function makeVectorStyleFn(getLayerState, def, ctx) {
     } else if (isLine) {
       const l = st.line;
       const w = l.width * pxPerPt;
-      styles.push(new Style({
-        stroke: new Stroke({ color: rgba(catColor || l.color, l.opacity == null ? 1 : l.opacity), width: w, lineDash: dashArray(l.dash, w, pxPerPt * 0.6), lineCap: dashCap(l.dash), lineJoin: 'round' }),
-      }));
+      if (l.deco && l.deco !== 'none') {
+        styles.push(new Style({
+          renderer(coords, state) {
+            const k = pxPerPt * state.pixelRatio;
+            const lines = Array.isArray(coords[0][0]) ? coords : [coords];
+            for (const ln of lines) drawDecoratedLine(state.context, ln, l, k, catColor);
+          },
+        }));
+      } else {
+        styles.push(new Style({
+          stroke: new Stroke({ color: rgba(catColor || l.color, l.opacity == null ? 1 : l.opacity), width: w, lineDash: dashArray(l.dash, w, pxPerPt * 0.6), lineCap: dashCap(l.dash), lineJoin: 'round' }),
+        }));
+      }
     } else {
       const pg = st.polygon;
       const fillColor = catColor || pg.fill;

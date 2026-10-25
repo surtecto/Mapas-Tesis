@@ -12,13 +12,20 @@ import { createXYZ, extentFromProjection } from 'ol/tilegrid.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
 import EsriJSON from 'ol/format/EsriJSON.js';
 import { bbox as bboxStrategy } from 'ol/loadingstrategy.js';
-import { transformExtent } from 'ol/proj.js';
+import { transformExtent, addProjection, addCoordinateTransforms, get as getProjectionOl } from 'ol/proj.js';
+import Projection from 'ol/proj/Projection.js';
+import ImageStatic from 'ol/source/ImageStatic.js';
+import Feature from 'ol/Feature.js';
+import { Style, Stroke, Fill, Text } from 'ol/style.js';
 import { getRenderPixel } from 'ol/render.js';
 import { getDef, RAMPS } from './catalog.js';
 import { EMBEDDED } from './embedded.js';
-import { makeVectorStyleFn } from './styles.js';
-import { hexToRgb } from './util.js';
-import { lonLatTo, metersPerUnit } from './projections.js';
+import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
+import { hexToRgb, rgba, PT_MM } from './util.js';
+import { lonLatTo, toLonLatFrom, metersPerUnit } from './projections.js';
+import { fitModel, modelHash } from './georef.js';
+import { peekImage, processedReady, processedUrl, getImage } from './imagestore.js';
+import { CERTAINTY } from './state.js';
 
 const geojson = new GeoJSON();
 const esrijson = new EsriJSON();
@@ -99,12 +106,14 @@ function readFeatures(obj, projCode) {
 const rasterSources = new Map();
 function cacheKey(ls, extra = '') { return `${ls.uid}:${ls.rev}:${extra}`; }
 
-const IGN_WMS_PROJ = ['EPSG:3857', 'EPSG:3031', 'EPSG:4326', 'EPSG:6932', 'EPSG:32720', 'EPSG:32721'];
+const IGN_WMS_PROJ = ['EPSG:3857', 'EPSG:3031', 'EPSG:4326', 'EPSG:6932', 'EPSG:32720', 'EPSG:32721', 'EPSG:5343', 'EPSG:5344', 'EPSG:5345', 'EPSG:5346', 'EPSG:5347', 'EPSG:5348', 'EPSG:5349', 'EPSG:22195'];
 
 function wmsRequestProjection(def, mapProj) {
   const list = def.wmsProjections || IGN_WMS_PROJ;
   if (list.includes(mapProj)) return mapProj;
   if (list.includes('EPSG:3031') && /^CONI:/.test(mapProj)) return 'EPSG:4326';
+  // fuera de las polares, pedir en Mercator y reproyectar suele dar teselas más nítidas que en geográficas
+  if (list.includes('EPSG:3857') && !/^(EPSG:3031|EPSG:6932|CONI:)/.test(mapProj)) return 'EPSG:3857';
   return list.includes('EPSG:4326') ? 'EPSG:4326' : list[0];
 }
 
@@ -365,6 +374,204 @@ function buildEsriFeatureSource(ls, def, mctx) {
   return src;
 }
 
+
+// ---------- WFS del IGN pedido por la extensión de la vista ----------
+// Solo carga a escalas de detalle (def.maxMpm: metros de terreno por mm de papel); a escala menor la capa queda en espera.
+function buildWfsViewSource(ls, def, mctx) {
+  const src = new VectorSource({
+    wrapX: false,
+    strategy: bboxStrategy,
+    loader(extent, resolution, projection, success, failure) {
+      const center = mctx.map ? mctx.map.getView().getCenter() : [0, 0];
+      let mpm = resolution;
+      try { mpm = resolution * metersPerUnit(mctx.projection, center) * mctx.pxPerMm; } catch (e) { /* noop */ }
+      const cur = mctx.getLayerState(ls.uid) || ls;
+      const limit = (def.maxMpm || 1500) * (cur.params && cur.params.force ? 8 : 1);
+      if (mpm > limit) { src._tooFar = true; src.dispatchEvent('cm-far'); failure(); return; }
+      src._tooFar = false;
+      let ll;
+      try { ll = transformExtent(extent, projection, 'EPSG:4326', 16); } catch (e) { failure(); return; }
+      ll = [Math.max(-180, ll[0]), Math.max(-90, ll[1]), Math.min(180, ll[2]), Math.min(90, ll[3])];
+      if (!(ll[2] > ll[0] && ll[3] > ll[1])) { success([]); return; }
+      const p = new URLSearchParams({
+        service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: def.typeName, outputFormat: 'application/json',
+        srsName: 'EPSG:4326', bbox: `${ll.map((v) => v.toFixed(5)).join(',')},EPSG:4326`, maxFeatures: '6000',
+      });
+      src._pend = (src._pend || 0) + 1;
+      src._loading = true;
+      fetch(`${def.url}?${p.toString()}`).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).then((obj) => {
+        const feats = readFeatures(obj, mctx.projection);
+        src.addFeatures(feats);
+        if ((obj.features || []).length >= 6000) src._truncated = true;
+        success(feats);
+      }).catch((err) => {
+        if (mctx.onLayerError) mctx.onLayerError(ls, err);
+        failure();
+      }).finally(() => { src._pend -= 1; src._loading = src._pend > 0; });
+    },
+  });
+  return src;
+}
+
+// ---------- planos georreferenciados ----------
+const georefRegistered = new Set();
+export function georefModel(state, sourceId) {
+  const src = state.interp.sources.find((x) => x.id === sourceId);
+  if (!src) return { src: null, gr: null, model: null };
+  const ver = state.interp.versions.find((v) => v.id === state.interp.active);
+  const gr = ver && ver.georefs ? ver.georefs[sourceId] : null;
+  if (!gr) return { src, gr: null, model: null };
+  const key = `${modelHash(gr)}|${src.w}x${src.h}`;
+  if (!gr._model || gr._modelKey !== key) {
+    gr._model = fitModel(gr.gcps, gr.method, { imageSize: [src.w, src.h] });
+    gr._modelKey = key;
+  }
+  return { src, gr, model: gr._model };
+}
+
+function ensureImageProjection(src, gr, model, mapProj) {
+  const code = `IMG:${src.id}:${modelHash(gr)}`;
+  let proj = getProjectionOl(code);
+  if (!proj) {
+    proj = new Projection({ code, units: 'pixels', extent: [0, 0, src.w, src.h], metersPerUnit: Math.max(1e-6, model.mpp || 1), getPointResolution: (r) => r });
+    addProjection(proj);
+  }
+  const k = `${code}>${mapProj}`;
+  if (!georefRegistered.has(k)) {
+    const H = src.h;
+    const out = model.outline || [];
+    let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+    out.forEach(([lo, la]) => { w = Math.min(w, lo); e = Math.max(e, lo); s = Math.min(s, la); n = Math.max(n, la); });
+    const mx = (e - w) * 0.25 + 0.01, my = (n - s) * 0.25 + 0.01;
+    const box = [w - mx, s - my, e + mx, n + my];
+    const FAR = [-1e9, -1e9];
+    addCoordinateTransforms(proj, getProjectionOl(mapProj),
+      (c) => { const ll = model.forward(c[0], H - c[1]); return Number.isFinite(ll[0]) ? lonLatTo(mapProj, ll) : [NaN, NaN]; },
+      (c) => {
+        const ll = toLonLatFrom(mapProj, c);
+        if (!ll || !(ll[0] >= box[0] && ll[0] <= box[2] && ll[1] >= box[1] && ll[1] <= box[3])) return FAR.slice();
+        const p = model.inverse(ll[0], ll[1]);
+        return Number.isFinite(p[0]) && Number.isFinite(p[1]) ? [p[0], H - p[1]] : FAR.slice();
+      });
+    georefRegistered.add(k);
+  }
+  return proj;
+}
+
+function refreshLater(ls, mctx) {
+  const cur = mctx.getLayerState(ls.uid);
+  if (!cur) return;
+  cur.rev += 1;
+  if (mctx.app.commit) mctx.app.commit('layers', { history: false });
+}
+
+function buildGeorefLayer(ls, mctx, className) {
+  const st = mctx.app.state;
+  const { src, gr, model } = georefModel(st, ls.params && ls.params.sourceId);
+  const empty = () => { const l = new ImageLayer({ className }); l._cmGeorefPending = true; return l; };
+  if (!src || !model || !model.ok) return empty();
+  const img = peekImage(src.key);
+  if (!img) {
+    getImage(src.key).then((v) => { if (v) refreshLater(ls, mctx); });
+    return empty();
+  }
+  const url = processedReady(src.key, src.proc);
+  if (!url) {
+    processedUrl(src.key, src.proc).then(() => refreshLater(ls, mctx)).catch(() => null);
+    return empty();
+  }
+  return georefImageLayer(src, gr, model, mctx.projection, url, className);
+}
+
+// Capa de imagen de un plano deformada según el modelo (también la usa el georreferenciador)
+export function georefImageLayer(src, gr, model, mapProj, url, className) {
+  const proj = ensureImageProjection(src, gr, model, mapProj);
+  const source = new ImageStatic({ url, projection: proj, imageExtent: [0, 0, src.w, src.h], interpolate: true });
+  const layer = new ImageLayer({ source, className });
+  // limita el dibujo al área que cubre el plano
+  try {
+    const ext = [Infinity, Infinity, -Infinity, -Infinity];
+    (model.outline || []).forEach((ll) => {
+      const c = lonLatTo(mapProj, ll);
+      ext[0] = Math.min(ext[0], c[0]); ext[1] = Math.min(ext[1], c[1]); ext[2] = Math.max(ext[2], c[0]); ext[3] = Math.max(ext[3], c[1]);
+    });
+    if (ext.every(Number.isFinite)) layer.setExtent(ext);
+  } catch (e) { /* noop */ }
+  return layer;
+}
+
+// ---------- capas de interpretación (versiones) ----------
+export function interpVersionOf(state, ls) {
+  const it = state.interp;
+  const id = ls.params && ls.params.version && ls.params.version !== 'active' ? ls.params.version : it.active;
+  return it.versions.find((v) => v.id === id) || null;
+}
+
+export function interpStyle(cat, cert, { ghost = false, pxPerPt, pr = 1, label = '', labelCfg } = {}) {
+  const c = CERTAINTY.find((x) => x.id === cert) || CERTAINTY[0];
+  const color = ghost ? '#8a8a8a' : cat.color;
+  const styles = [];
+  if (cat.geom === 'line') {
+    const l = { color, width: cat.width || 0.8, dash: ghost ? 'short' : c.dash, deco: ghost ? 'none' : cat.deco || 'none', decoColor: cat.decoColor, opacity: ghost ? 0.7 : 1 };
+    // la certeza se lee en el trazo (lleno, guiones, puntos); la decoración (peine, flechas…) se conserva
+    if (c.id !== 'cierta' && ['casing', 'double', 'rail'].includes(l.deco)) l.deco = 'none';
+    styles.push(new Style({ renderer(coords, state) {
+      const k = pxPerPt * state.pixelRatio;
+      const lines = Array.isArray(coords[0][0]) ? coords : [coords];
+      for (const ln of lines) drawDecoratedLine(state.context, ln, l, k);
+    } }));
+  } else if (cat.geom === 'polygon') {
+    const fo = ghost ? 0 : 0.35 * c.fill;
+    if (fo > 0) styles.push(new Style({ fill: new Fill({ color: rgba(color, fo) }) }));
+    if (!ghost && cat.pattern && cat.pattern !== 'none') {
+      const pat = getPattern(cat.pattern, rgba(color, 0.9), 2 * pxPerPt * 2.835 * pr, 0.3 * pxPerPt * pr);
+      if (pat) styles.push(new Style({ fill: new Fill({ color: pat }) }));
+    }
+    const w = (cat.width || 0.6) * pxPerPt;
+    styles.push(new Style({ stroke: new Stroke({ color: rgba(color, ghost ? 0.8 : 1), width: w, lineDash: dashArray(ghost ? 'short' : c.dash, w, pxPerPt * 0.6), lineCap: dashCap(c.dash), lineJoin: 'round' }) }));
+  } else {
+    const cfg = { shape: cat.shape || 'circle', size: cat.size || 5, fill: color, fillOpacity: ghost ? 0 : c.id === 'cierta' ? 1 : c.id === 'probable' ? 0.45 : 0, stroke: c.id === 'cierta' && !ghost ? '#ffffff' : color, strokeWidth: c.id === 'cierta' && !ghost ? 0.5 : 0.9 };
+    styles.push(new Style({ renderer(coords, state) {
+      const draw = (p) => drawSymbol(state.context, p[0], p[1], cfg, pxPerPt * state.pixelRatio);
+      if (Array.isArray(coords[0])) coords.forEach(draw); else draw(coords);
+    } }));
+  }
+  if (label && !ghost) {
+    const lc = labelCfg || {};
+    const sizePx = (lc.size || 6) * pxPerPt;
+    styles.push(new Style({ text: new Text({
+      text: c.mark ? `${label} ?` : label, font: fontString({ font: lc.font || 'Source Sans 3', sizePx, italic: c.id !== 'cierta' }),
+      fill: new Fill({ color: lc.color || '#1d2b38' }), stroke: new Stroke({ color: lc.halo || '#ffffff', width: 1.1 * pxPerPt * 2 }),
+      offsetY: cat.geom === 'point' ? -7 * pxPerPt : 0, placement: cat.geom === 'line' ? 'line' : 'point', overflow: true,
+    }) }));
+  }
+  return styles;
+}
+
+function buildInterpLayer(ls, mctx, className) {
+  const st = mctx.app.state;
+  const ver = interpVersionOf(st, ls);
+  const src = new VectorSource({ wrapX: false });
+  if (ver) {
+    try { src.addFeatures(readFeatures(ver.features, mctx.projection)); } catch (e) { if (mctx.onLayerError) mctx.onLayerError(ls, e); }
+  }
+  const ghost = !!(ls.params && ls.params.ghost);
+  const cache = new Map();
+  let cacheV = -1, cacheS = -1;
+  const layer = new VectorLayer({ source: src, className, declutter: false, style: (f) => {
+    const cur = mctx.getLayerState(ls.uid) || ls;
+    if (cur._styleVersion !== cacheV || mctx.pxPerMm !== cacheS) { cache.clear(); cacheV = cur._styleVersion; cacheS = mctx.pxPerMm; }
+    const it = mctx.app.state.interp;
+    const cat = it.categories.find((c) => c.id === f.get('cat')) || { geom: (f.getGeometry() && /Point/.test(f.getGeometry().getType())) ? 'point' : /Line/.test(f.getGeometry() ? f.getGeometry().getType() : '') ? 'line' : 'polygon', color: '#555555' };
+    const showLabel = cur.params && cur.params.labels !== false;
+    const key = `${f.get('cat')}|${f.get('cert')}|${showLabel ? f.get('name') || '' : ''}|${JSON.stringify(cat)}`;
+    if (!cache.has(key)) cache.set(key, interpStyle(cat, f.get('cert'), { ghost, pr: mctx.pixelRatio || 1, pxPerPt: mctx.pxPerMm * PT_MM, label: showLabel ? f.get('name') || '' : '', labelCfg: cur.params && cur.params.label }));
+    return cache.get(key);
+  } });
+  layer._interpSource = src;
+  return layer;
+}
+
 // ---------- sitios ----------
 export function siteSymbolCfg(site, st) {
   const ss = st.siteStyle;
@@ -457,6 +664,14 @@ export function buildOlLayer(ls, mctx) {
   const decl = !!(ls.style && ls.style.label && ls.style.label.show && ls.style.label.declutter);
   if (def.type === 'graticule') {
     return null; // la grilla se dibuja como vector en la capa de composición
+  } else if (def.type === 'georef') {
+    layer = buildGeorefLayer(ls, mctx, className);
+  } else if (def.type === 'interp') {
+    layer = buildInterpLayer(ls, mctx, className);
+  } else if (def.type === 'wfs-view') {
+    const src = buildWfsViewSource(ls, def, mctx);
+    layer = new VectorLayer({ source: src, style: makeVectorStyleFn(getLs, def, mctx), declutter: decl, className });
+    layer._viewSource = src;
   } else if (def.kind === 'raster') {
     if (def.type === 'terrarium') layer = buildDemLayer(ls, def, mctx, className);
     else {

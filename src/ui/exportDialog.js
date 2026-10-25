@@ -2,6 +2,7 @@
 import { el, clear, downloadBlob, fmtInt } from '../util.js';
 import { field, inlineFields, select, check, range, button, text } from './forms.js';
 import { exportSize, renderRaster, renderSvg, canvasToPng, canvasToJpeg, canvasToTiff, canvasToPdf } from '../exporter.js';
+import { getMedia, exportDpi, checkLegibility } from '../media.js';
 
 const FORMATS = [
   ['png', 'PNG (sin pérdida)'],
@@ -18,13 +19,16 @@ function slug(s) {
 export function openExportDialog(app) {
   const dlg = document.getElementById('export-dialog');
   const st = app.state;
-  const opts = app.ui.exportOpts || (app.ui.exportOpts = { format: 'png', dpi: '300', quality: 0.92, lossless: false, name: slug(st.title) });
+  const media = getMedia(st.media.profileId);
+  const opts = app.ui.exportOpts || (app.ui.exportOpts = { format: media.format, dpi: String(exportDpi(st)), quality: 0.92, lossless: false, name: slug(st.title) });
+  if (app.ui.exportProfile !== `${media.id}|${st.media.quality}`) { opts.dpi = String(exportDpi(st)); opts.format = media.format; app.ui.exportProfile = `${media.id}|${st.media.quality}`; }
   opts.name = slug(st.title);
   const body = dlg.querySelector('.dlg-body');
   clear(body);
   const summary = el('div', { class: 'export-summary', 'aria-live': 'polite' });
   const progress = el('div', { class: 'export-progress', 'aria-live': 'polite' });
   const qualityRow = el('div', {});
+  const legib = checkLegibility(st);
   const updateSummary = () => {
     const dpi = Number(opts.dpi);
     const { W, H, ok } = exportSize(st, dpi);
@@ -36,13 +40,20 @@ export function openExportDialog(app) {
       !ok ? el('p', { class: 'warn-note' }, 'Supera el límite de lienzo del navegador: bajá la resolución o el tamaño de la página.') : null,
       ok && mp > 40 ? el('p', { class: 'warn-note' }, 'Imagen muy grande: puede tardar varios minutos y requerir mucha memoria.') : null,
       opts.format === 'svg' ? el('p', { class: 'note' }, 'Cada capa del mapa se incrusta como imagen en su propio grupo; textos, leyenda, norte, escala, conectores y sitios quedan como vectores editables.') : null,
+      st.render.colorMode === 'grises' ? el('p', { class: 'note' }, 'Salida en escala de grises (Figura › Destino).') : null,
+      legib.issues.length ? el('p', { class: 'warn-note' }, `Para «${media.name}» hay ${legib.issues.length} avisos de legibilidad (Figura › Destino de la figura).`) : null,
     );
     clear(qualityRow);
     if (opts.format === 'jpeg' || (opts.format === 'pdf' && !opts.lossless)) qualityRow.append(field('Calidad JPEG', range(opts, 'quality', { min: 0.6, max: 1, step: 0.01, format: (v) => `${Math.round(v * 100)}%` })));
     if (opts.format === 'pdf') qualityRow.append(check(opts, 'lossless', 'PDF sin pérdida (más pesado)', { onChange: updateSummary }));
   };
   const fmtSel = select(opts, 'format', FORMATS, { onChange: updateSummary });
-  const dpiSel = select(opts, 'dpi', [['150', '150 ppp (borrador, pantalla)'], ['300', '300 ppp (fotografías, imágenes en color)'], ['600', '600 ppp (figuras combinadas con texto)'], ['1200', '1200 ppp (dibujo lineal)']], { onChange: updateSummary });
+  const dpiList = [['150', '150 ppp (borrador, pantalla)'], ['300', '300 ppp (fotografías, imágenes en color)'], ['600', '600 ppp (figuras combinadas con texto)'], ['1200', '1200 ppp (dibujo lineal)']];
+  const pd = String(exportDpi(st));
+  if (!dpiList.some((d) => d[0] === pd)) dpiList.unshift([pd, `${pd.replace('.', ',')} ppp (según el destino: ${media.name})`]);
+  else dpiList.forEach((d) => { if (d[0] === pd) d[1] += ' · destino'; });
+  if (!dpiList.some((d) => d[0] === opts.dpi)) opts.dpi = pd;
+  const dpiSel = select(opts, 'dpi', dpiList, { onChange: updateSummary });
   const go = button('Exportar', async () => {
     go.disabled = true;
     clear(progress);
