@@ -122,7 +122,16 @@ class App {
     const m = maps.find((x) => x.id === mapId) || maps.find((x) => x.id === p.activeMapId) || maps[0];
     if (this.current && this.current.mapId !== m.id) await this.saveCurrent({ thumb: true });
     let state;
-    try { state = normalizeState(m.state); } catch (err) { console.error(err); this.toast(`El mapa «${m.name}» está dañado: ${err.message}`, 'error'); state = normalizeState(buildFirstMap(p.meta, p.meta.area, { start: 'blank' })); }
+    try { state = normalizeState(m.state); } catch (err) {
+      // nunca se pisa lo guardado con un mapa de reemplazo: se avisa y se vuelve al inicio
+      console.error(err);
+      this.toast(`No se pudo abrir el mapa «${m.name}» (${err.message}). Lo guardado no se tocó: exportá el proyecto desde el inicio y avisá del problema.`, 'error');
+      this.current = null;
+      this.setHash('#/');
+      renderHome(this);
+      return;
+    }
+    if (state._dropped) { this.toast(`Se omitieron capas que no se pudieron leer: ${state._dropped.join(', ')}.`, 'warn'); delete state._dropped; }
     state.title = m.name || state.title;
     this.fillFromMeta(state, p.meta);
     this.current = { projectId, mapId: m.id, project: p, maps: maps.map((x) => ({ id: x.id, name: x.name, updated: x.updated, thumb: x.thumb })) };
@@ -766,7 +775,7 @@ class App {
     return { fmt, dpi, W: r.W, H: r.H, bytes: blob.size, tileErrors: r.tileErrors, ms: Math.round(performance.now() - t0) };
   }
 
-  undo() { const j = this.history.undo(); if (j) { this.state = normalizeState(JSON.parse(j)); this.applyState(); this.scheduleSave(); } }
+  undo() { this.history.push(serializeState(this.state)); const j = this.history.undo(); if (j) { this.state = normalizeState(JSON.parse(j)); this.applyState(); this.scheduleSave(); } }
   redo() { const j = this.history.redo(); if (j) { this.state = normalizeState(JSON.parse(j)); this.applyState(); this.scheduleSave(); } }
 
   applyOpacity(ls) {

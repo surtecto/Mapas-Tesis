@@ -179,14 +179,26 @@ export function emptyState() {
 export function normalizeState(s) {
   const base = emptyState();
   const out = mergeDeep(base, s || {});
+  // cada capa se normaliza por separado: una capa rota no puede arrastrar al resto del mapa
+  const dropped = [];
   out.layers = (out.layers || []).filter((l) => getDef(l.def) || l.def === 'user' || (l.def === 'svc' && l.svc)).map((l) => {
-    if (l.def === 'user') return l;
-    const fresh = newLayerState(l.def);
-    if (l.def === 'georef' || l.def === 'interp') fresh.legend.show = false;
-    const merged = mergeDeep(fresh, l);
-    merged._styleVersion = 0;
-    return merged;
-  });
+    try {
+      if (l.def === 'user') return l;
+      if (l.def === 'svc') {
+        const merged = mergeDeep(newServiceLayerState(l.svc), l);
+        merged.svc = l.svc;
+        if (!merged.params) merged.params = { filter: [] };
+        merged._styleVersion = 0;
+        return merged;
+      }
+      const fresh = newLayerState(l.def);
+      if (l.def === 'georef' || l.def === 'interp') fresh.legend.show = false;
+      const merged = mergeDeep(fresh, l);
+      merged._styleVersion = 0;
+      return merged;
+    } catch (e) { dropped.push(l.name || l.def); return null; }
+  }).filter(Boolean);
+  if (dropped.length) out._dropped = dropped;
   out.siteStyle = mergeDeep(defaultSiteStyle(), out.siteStyle || {});
   out.legend = mergeDeep(defaultLegend(), out.legend || {});
   out.north = mergeDeep(defaultNorth(), out.north || {});
