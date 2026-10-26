@@ -6,6 +6,7 @@ import VectorLayer from 'ol/layer/Vector.js';
 import Feature from 'ol/Feature.js';
 import { Style, Stroke, Fill, Circle as CircleStyle } from 'ol/style.js';
 import { featureKey, featuresByKeys } from './features.js';
+import { SelectTool } from './ui/selectTool.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
 import { transformExtent } from 'ol/proj.js';
 import { MapCtx } from './mapctx.js';
@@ -194,6 +195,7 @@ class App {
   newProject() { location.hash = '#/nuevo'; }
 
   async leaveEditor() {
+    if (this.selTool) this.selTool.close();
     if (this.current && this.state) { this.stopDraw && this.editorReady && this.stopDraw(true); await this.saveCurrent({ thumb: true }); }
     this.current = null;
     document.title = 'Mapas-Tesis';
@@ -516,6 +518,9 @@ class App {
     Object.assign(this.$.mapMain.style, { left: `${f0.x * this.pxPerMm}px`, top: `${f0.y * this.pxPerMm}px`, width: `${f0.w * this.pxPerMm}px`, height: `${f0.h * this.pxPerMm}px` });
     this.mainCtx = new MapCtx({ app: this, target: this.$.mapMain, role: 'main', pxPerMm: this.pxPerMm });
     this.wireMainMap();
+    this.selTool = new SelectTool(this);
+    const sb = document.getElementById('btn-select');
+    if (sb) sb.addEventListener('click', () => this.selTool.toggle());
     this.buildInsets();
     this.setupChrome();
     this.setupPointer();
@@ -748,6 +753,7 @@ class App {
     this.$.projection.value = this.state.projection;
     this.renderLeft();
     this.renderInspector();
+    if (this.selTool) this.selTool.refresh();
     this.applyPreviewFilter();
     this.updateModelRef();
     this.redraw();
@@ -924,6 +930,7 @@ class App {
     this.renderInspector();
     this.redraw();
     this.refreshHighlight();
+    if (this.selTool) this.selTool.paintCount();
     document.body.classList.toggle('has-selection', !!sel);
   }
 
@@ -1328,6 +1335,7 @@ class App {
       drag = null;
       if (d.kind === 'map') {
         if (!d.moved) {
+          if (this.selTool && this.selTool.active && !this.analysisDraw && !this.mode) { this.selTool.clickAt(e); return; }
           const fid = this.interpFeatureAt(e);
           if (fid) { this.select({ kind: 'interp', id: fid }); if (this.ui.tab === 'interp') this.renderLeft(); return; }
           const hit = this.analysisDraw || this.mode ? null : this.vectorFeatureAt(e);
@@ -1402,7 +1410,9 @@ class App {
       if (e.key === 'Escape') {
         if (this.analysisDraw) { this.stopAnalysisDraw(); this.toast('Medición cancelada.'); return; }
         if (this.mode === 'draw' || this.mode === 'modify') { if (this._draw && this._draw.abortDrawing) this._draw.abortDrawing(); this.stopDraw(); return; }
-        if (this.mode) { this.setMode(null); this.renderLeft(); } else this.select(null);
+        if (this.selTool && this.selTool.active && this.selTool.abortDrawing()) return;
+        if (this.mode) { this.setMode(null); this.renderLeft(); } else if (this.selection) this.select(null);
+        else if (this.selTool && this.selTool.active) this.selTool.close();
         return;
       }
       const sel = this.selection;

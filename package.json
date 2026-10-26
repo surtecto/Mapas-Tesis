@@ -1,6 +1,6 @@
 {
   "name": "mapas-tesis",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "description": "Generador de mapas para tesis: proyectos por computadora, servicios oficiales argentinos como vectores editables, imágenes satelitales en el tiempo, coberturas, análisis espacial, destinos de la figura y mapas de interpretación sobre planos históricos",
   "scripts": {
     "build": "node tools/build.mjs",
@@ -13,7 +13,9 @@
     "@turf/along": "^7.4.0",
     "@turf/area": "^7.4.0",
     "@turf/bbox-clip": "^7.4.0",
+    "@turf/boolean-intersects": "^7.4.0",
     "@turf/boolean-point-in-polygon": "^7.4.0",
+    "@turf/boolean-within": "^7.4.0",
     "@turf/buffer": "^7.4.0",
     "@turf/center-mean": "^7.4.0",
     "@turf/helpers": "^7.4.0",

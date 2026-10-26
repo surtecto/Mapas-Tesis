@@ -286,7 +286,7 @@ export function classLabelStyle(cls) { return CLASS_LABEL[cls] || CLASS_LABEL.is
 
 // ---------- funciones de estilo de capas vectoriales ----------
 // ctx: { pxPerMm (px CSS por mm de papel), pixelRatio }
-// Filtro por atributos hecho en el navegador: [{ field, op, value }] con op =, ≠, >, <, ≥, ≤, contiene, vacío
+// Filtro por atributos hecho en el navegador: [{ field, op, value }] con op =, ≠, >, <, ≥, ≤, contiene, empieza con, es uno de (a; b), vacío
 const normTxt = (v) => String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 export function passFilter(feature, rules, mode = 'all') {
   const test = (r) => {
@@ -302,6 +302,11 @@ export function passFilter(feature, rules, mode = 'all') {
       case '≥': return num && a >= b;
       case '≤': return num && a <= b;
       case 'contiene': return normTxt(v).includes(normTxt(r.value));
+      case 'empieza con': return normTxt(v).startsWith(normTxt(r.value));
+      case 'es uno de': return String(r.value || '').split(/[;|]/).map(normTxt).filter(Boolean).some((x) => {
+        const xn = Number(x);
+        return x !== '' && Number.isFinite(a) && Number.isFinite(xn) ? a === xn : normTxt(v) === x;
+      });
       case 'vacío': return v == null || String(v).trim() === '';
       case 'no vacío': return !(v == null || String(v).trim() === '');
       default: return true;

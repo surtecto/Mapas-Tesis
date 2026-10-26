@@ -29,6 +29,9 @@ export function renderInspector(app, root) {
   clear(root);
   const sel = app.selection;
   const st = app.state;
+  const tool = app.selTool && app.selTool.active;
+  if (tool) root.append(app.selTool.build());
+  if (!sel && tool) return;
   if (!sel) {
     root.append(
       el('h2', { class: 'insp-title' }, 'Edición'),
