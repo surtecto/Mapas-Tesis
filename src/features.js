@@ -72,7 +72,8 @@ export function effectiveStyle(ls, feature, classify) {
   const clone = (o) => JSON.parse(JSON.stringify(o || {}));
   const polygon = clone(st.polygon), line = clone(st.line), point = clone(st.point);
   if (col) { polygon.fill = col; line.color = col; point.fill = col; }
-  if (polygon.fillOpacity === 0) polygon.fillOpacity = 0.55;
+  // lo que se elige para destacar tiene que verse: relleno al menos al 60 %
+  polygon.fillOpacity = Math.max(0.6, Number(polygon.fillOpacity) || 0);
   return { polygon, line, point };
 }
 

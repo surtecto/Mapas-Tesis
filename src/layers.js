@@ -23,7 +23,21 @@ import { swapCoords, serverError } from './services.js';
 import { landcoverRenderingRule, yearTime, paintLabels } from './imagery.js';
 import { cacheGet, cachePut, gridTiles, FRESH_MS } from './layercache.js';
 import { EMBEDDED } from './embedded.js';
-import { ensureIds } from './features.js';
+import { ensureIds, featureKey } from './features.js';
+
+// agrega objetos sin repetir: los que traen id los descarta OpenLayers; los que no, por su huella de atributos
+function addUnique(src, feats) {
+  if (!src._keys) src._keys = new Set(src.getFeatures().filter((f) => f.getId() == null).map(featureKey));
+  const out = [];
+  for (const f of feats) {
+    if (f.getId() != null) { out.push(f); continue; }
+    const k = featureKey(f);
+    if (src._keys.has(k)) continue;
+    src._keys.add(k); out.push(f);
+  }
+  src.addFeatures(out);
+  return out;
+}
 import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
 import { hexToRgb, rgba, PT_MM } from './util.js';
 import { lonLatTo, toLonLatFrom, metersPerUnit } from './projections.js';
@@ -499,7 +513,7 @@ function buildWfsViewSource(ls, def, mctx) {
           if (res.v.cached) src._cachedAt = Math.min(src._cachedAt || Infinity, res.v.t);
           all.push(...readFeatures(obj, mctx.projection));
         });
-        src.addFeatures(all); // los objetos que cruzan dos teselas tienen el mismo id y no se duplican
+        addUnique(src, all); // los objetos que cruzan dos teselas no se duplican
         if (failed) {
           if (mctx.onLayerError) mctx.onLayerError(ls, failed);
           failure(); // lo que faltó se vuelve a pedir al mover o acercar el mapa
@@ -617,12 +631,12 @@ function buildServiceVectorSource(ls, def, mctx) {
           pr.catch(() => svcWholeCache.delete(key));
           svcWholeCache.set(key, pr);
         }
-        job = svcWholeCache.get(key).then((feats) => { const c = feats.map((f) => f.clone()); c._truncated = feats._truncated; return c; });
+        job = svcWholeCache.get(key).then((feats) => { const c = feats.map((f) => { const k = f.clone(); k.setId(f.getId()); return k; }); c._truncated = feats._truncated; return c; });
       } else {
         job = def.type === 'svc-wfs' ? fetchWfsFeatures(def, ll, mctx.projection) : fetchArcgisFeatures(def, ll, mctx.projection, mPerPx);
       }
       job.then((feats) => {
-        src.addFeatures(feats);
+        addUnique(src, feats);
         src._truncated = !!feats._truncated;
         if (mctx.onLayerOk) mctx.onLayerOk(ls);
         success(feats);
