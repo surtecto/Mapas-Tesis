@@ -23,8 +23,11 @@ import { buildFirstMap } from '../starter.js';
 import { searchPlaces } from './search.js';
 import { gkFaja } from '../projections.js';
 import { getDef } from '../catalog.js';
-import { confirmDialog } from './dialogs.js';
+import { confirmDialog, promptDialog } from './dialogs.js';
 import { cacheInfo, cacheClear } from '../layercache.js';
+import {
+  folderStatus, chooseFolder, reconnectFolder, unlinkFolder, syncAll, setDeviceName, deviceName, markAllLocalOnly, setLocalOnly, restoreToFolder, importForeign,
+} from '../folder.js';
 
 const IGN = (n) => `https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/${n}@EPSG%3A3857@png/{z}/{x}/{-y}.png`;
 const ESRI_IMG = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -64,9 +67,20 @@ function prepareRoot() {
 }
 
 // ---------- inicio ----------
-export async function renderHome(app) {
+export async function renderHome(app, { sync = true } = {}) {
   const root = prepareRoot();
   const [projects, st, lc] = await Promise.all([listProjects().catch((e) => { app.toast(e.message, 'error'); return []; }), storageInfo(), cacheInfo()]);
+  // con carpeta conectada, al entrar se trae lo que cambió en otras computadoras
+  const fs0 = folderStatus();
+  if (sync && fs0.ready && !fs0.busy && (!app._lastHomeSync || Date.now() - app._lastHomeSync > 10000)) {
+    app._lastHomeSync = Date.now();
+    syncAll().then((res) => {
+      if (res.imported.length || res.updated.length || res.conflicts.length || res.removed.length || res.written.length || (res.foreign && res.foreign.length)) {
+        if (app.reportSync) app.reportSync(res);
+      }
+      if (document.body.classList.contains('on-home') && !location.hash.startsWith('#/nuevo')) renderHome(app, { sync: false });
+    });
+  }
   const importInput = el('input', { type: 'file', accept: '.json,application/json', hidden: true });
   importInput.addEventListener('change', async () => {
     const f = importInput.files[0];
@@ -115,14 +129,16 @@ export async function renderHome(app) {
       el('span', {}, 'Empezá uno con la hoja en blanco, copiá un ejemplo o importá el archivo .json que exportaste en otra computadora.')));
   }
   for (const p of projects) list.append(projectSheet(app, p));
+  const fstrip = folderStrip(app, projects);
   const usage = st.usage != null ? `${mb(st.usage)} en uso${st.quota ? ` de ${mb(st.quota)} disponibles` : ''}` : '';
   const libr = el('section', { class: 'home-library', 'aria-labelledby': 'h-lib' },
     el('div', { class: 'lib-head' },
-      el('h1', { id: 'h-lib' }, 'Proyectos en esta computadora'),
+      el('h1', { id: 'h-lib' }, fs0.ready ? 'Proyectos' : 'Proyectos en esta computadora'),
       projects.length ? el('span', { class: 'lib-count' }, String(projects.length)) : null),
+    fstrip,
     list,
     el('footer', { class: 'home-foot' },
-      el('p', {}, 'Los proyectos se guardan en este navegador mientras trabajás. Cada computadora tiene su propia planoteca y no pisa la de otra: para llevar un proyecto, exportalo e importalo allá.', usage ? ` ${usage}.` : ''),
+      el('p', {}, fs0.linked ? 'Los proyectos se guardan en este navegador mientras trabajás y, además, como archivos en la carpeta elegida.' : 'Los proyectos se guardan en este navegador mientras trabajás. Para verlos en otra computadora, elegí una carpeta sincronizada arriba o exportá el proyecto e importalo allá.', usage ? ` ${usage}.` : ''),
       lc.n ? el('p', {}, `Además, ${lc.n.toLocaleString('es-AR')} teselas de capas oficiales (${mb(lc.bytes)}) quedaron guardadas para que los mapas se vean aunque el servidor no responda. `,
         el('button', { type: 'button', class: 'btn small ghost', onclick: async () => {
           const ok = await confirmDialog({ title: 'Vaciar las capas guardadas', text: 'Se borran las copias locales de las capas oficiales. Los proyectos no se tocan; las capas se vuelven a pedir a sus servidores.', ok: 'Vaciar' });
@@ -141,10 +157,106 @@ export async function renderHome(app) {
     el('main', { class: `home-main${projects.length ? ' has-projects' : ''}` }, start, libr));
 }
 
+// ---------- carpeta de proyectos ----------
+function folderStrip(app, projects) {
+  const f = folderStatus();
+  const wrap = el('div', { class: `folder-strip${f.ready ? ' ready' : ''}` });
+  if (!f.supported) {
+    wrap.append(el('p', {}, el('strong', {}, 'Carpeta de proyectos: '), 'este navegador no deja elegir una carpeta. En Chrome o Edge, los proyectos se pueden guardar en una carpeta (por ejemplo de OneDrive) y verse en otras computadoras; acá, exportalos e importalos.'));
+    return wrap;
+  }
+  const pick = async () => {
+    try { await chooseFolder(); } catch (e) { if (e && e.name !== 'AbortError') app.toast(`No se pudo usar esa carpeta: ${e.message}`, 'error'); return; }
+    const nm = await promptDialog({ title: 'Nombre de esta computadora', label: 'Con este nombre se reconoce quién guardó cada versión', value: deviceName(), ok: 'Listo' });
+    if (nm) setDeviceName(nm);
+    const mine = projects.filter((p) => !(p.sync && p.sync.localOnly));
+    if (mine.length) {
+      const all = await confirmDialog({
+        title: 'Los proyectos de esta computadora',
+        text: `¿Guardar también en la carpeta ${mine.length === 1 ? 'el proyecto que ya está' : `los ${mine.length} proyectos que ya están`} en esta computadora?`,
+        note: 'Con «Solo los nuevos», los de ahora quedan acá y se pueden pasar uno por uno desde su menú ⋯. Los proyectos que ya estén en la carpeta aparecen igual.',
+        ok: 'Guardar todos', cancel: 'Solo los nuevos',
+      });
+      if (!all) await markAllLocalOnly();
+    }
+    app._lastHomeSync = Date.now();
+    const res = await syncAll();
+    app.toast(`Carpeta «${folderStatus().name}» lista: ${res.written.length} proyecto(s) guardado(s)${res.imported.length ? `, ${res.imported.length} traído(s) de la carpeta` : ''}.`);
+    renderHome(app, { sync: false });
+  };
+  if (!f.linked) {
+    wrap.append(
+      el('div', { class: 'fs-text' },
+        el('strong', {}, 'Guardar los proyectos en una carpeta'),
+        el('span', {}, 'Elegí una carpeta de esta computadora. Si está dentro de OneDrive, Google Drive o Dropbox para escritorio, se sincroniza sola: en otra computadora elegís la misma carpeta y aparecen los mismos proyectos.')),
+      el('button', { type: 'button', class: 'btn primary', onclick: pick }, 'Elegir carpeta…'));
+    return wrap;
+  }
+  if (!f.ready) {
+    wrap.append(
+      el('div', { class: 'fs-text' },
+        el('strong', {}, `Carpeta «${f.name}»`),
+        el('span', {}, 'El navegador pide permiso otra vez para usarla. Elegí «Permitir en cada visita» para que no vuelva a preguntar.')),
+      el('button', { type: 'button', class: 'btn primary', onclick: async () => {
+        const ok = await reconnectFolder();
+        if (!ok) { app.toast('Sin permiso: los proyectos quedan solo en esta computadora.', 'warn'); return; }
+        app._lastHomeSync = Date.now();
+        const res = await syncAll();
+        if (app.reportSync) app.reportSync(res);
+        renderHome(app, { sync: false });
+      } }, 'Conectar'));
+    return wrap;
+  }
+  const when = f.lastSync ? new Date(f.lastSync).toLocaleString('es-AR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'todavía no';
+  wrap.append(
+    el('div', { class: 'fs-text' },
+      el('strong', {}, `Carpeta «${f.name}»`),
+      el('span', {}, `Esta computadora: ${f.device} · `, el('button', { type: 'button', class: 'linkish', onclick: async () => {
+        const nm = await promptDialog({ title: 'Nombre de esta computadora', label: 'Con este nombre se reconoce quién guardó cada versión', value: deviceName() });
+        if (nm) { setDeviceName(nm); renderHome(app, { sync: false }); }
+      } }, 'cambiar nombre'), ` · Sincronizada: ${f.busy ? 'ahora…' : when}`),
+      f.error ? el('span', { class: 'fs-error' }, f.error) : null),
+    el('div', { class: 'fs-actions' },
+      el('button', { type: 'button', class: 'btn small', onclick: async () => { app._lastHomeSync = Date.now(); const res = await syncAll(); if (app.reportSync) app.reportSync(res); renderHome(app, { sync: false }); } }, 'Sincronizar ahora'),
+      el('button', { type: 'button', class: 'btn small ghost', onclick: pick }, 'Cambiar carpeta'),
+      el('button', { type: 'button', class: 'btn small ghost', onclick: async () => {
+        const ok = await confirmDialog({ title: 'Dejar de usar la carpeta', text: `Los proyectos siguen en esta computadora y los archivos siguen en «${f.name}»; solo se deja de sincronizar.`, ok: 'Dejar de usarla' });
+        if (!ok) return;
+        await unlinkFolder(); renderHome(app, { sync: false });
+      } }, 'Desvincular')));
+  if (f.foreign.length) {
+    wrap.append(el('div', { class: 'fs-foreign' },
+      el('span', {}, 'En la carpeta hay archivos sueltos (proyectos exportados o copias que OneDrive hizo por un conflicto):'),
+      el('ul', {}, f.foreign.slice(0, 8).map((name) => el('li', {}, el('code', {}, name), ' ',
+        el('button', { type: 'button', class: 'btn small ghost', onclick: async () => {
+          try { const p = await importForeign(name); app.toast(`Importado como «${p.meta.name}». El archivo suelto pasó a la papelera de la carpeta.`); renderHome(app, { sync: false }); } catch (e) { app.toast(`No se pudo importar ${name}: ${e.message}`, 'error'); }
+        } }, 'Importar como proyecto'))))));
+  }
+  return wrap;
+}
+
+function syncState(p) {
+  const f = folderStatus();
+  if (!f.linked) return null;
+  const s = p.sync || {};
+  if (s.localOnly) return 'local';
+  if (s.removed) return 'removed';
+  if (s.folderId && s.folderId === f.folderId) return 'folder';
+  return 'pending';
+}
+const SYNC_LABEL = { local: 'Solo en esta computadora', removed: 'Quitado de la carpeta en otra computadora', folder: 'En la carpeta', pending: 'Por guardar en la carpeta' };
+
 function projectSheet(app, p) {
   const m = p.meta || {};
   const active = p.maps.find((x) => x.id === p.activeMapId) || p.maps[0] || {};
-  const menu = el('div', { class: 'menu pc-menu', role: 'menu', hidden: true },
+  const ss = syncState(p);
+  const f = folderStatus();
+  const folderItems = !ss ? [] : ss === 'local'
+    ? [el('button', { type: 'button', role: 'menuitem', onclick: async (e) => { e.stopPropagation(); if (!f.ready) { app.toast('Primero conectá la carpeta.', 'warn'); return; } await setLocalOnly(p.id, false); app.toast('Guardado en la carpeta.'); renderHome(app, { sync: false }); } }, 'Guardar en la carpeta')]
+    : ss === 'removed'
+      ? [el('button', { type: 'button', role: 'menuitem', onclick: async (e) => { e.stopPropagation(); if (!f.ready) { app.toast('Primero conectá la carpeta.', 'warn'); return; } await restoreToFolder(p.id); app.toast('El proyecto volvió a la carpeta.'); renderHome(app, { sync: false }); } }, 'Volver a ponerlo en la carpeta')]
+      : [el('button', { type: 'button', role: 'menuitem', onclick: async (e) => { e.stopPropagation(); await setLocalOnly(p.id, true); app.toast('Queda solo en esta computadora; el archivo de la carpeta no se toca.'); renderHome(app, { sync: false }); } }, 'Dejar solo en esta computadora')];
+  const menu = el('div', { class: 'menu pc-menu', role: 'menu', hidden: true }, ...folderItems,
     el('button', { type: 'button', role: 'menuitem', onclick: async (e) => { e.stopPropagation(); const np = await duplicateProject(p.id); app.toast(`Copia creada: ${np.meta.name}`); renderHome(app); } }, 'Duplicar'),
     el('button', { type: 'button', role: 'menuitem', onclick: async (e) => {
       e.stopPropagation(); menu.hidden = true;
@@ -169,7 +281,8 @@ function projectSheet(app, p) {
       el('div', {}, el('dt', {}, 'Tipo'), el('dd', {}, kindName(m.kind) || '—')),
       el('div', {}, el('dt', {}, 'Mapas'), el('dd', {}, String(p.maps.length))),
       el('div', {}, el('dt', {}, 'Autoría'), el('dd', {}, m.author || '—')),
-      el('div', {}, el('dt', {}, 'Cambios'), el('dd', {}, relTime(p.updated)))),
+      el('div', {}, el('dt', {}, 'Cambios'), el('dd', {}, relTime(p.changed || p.updated)))),
+    ss ? el('p', { class: `ps-sync ps-sync-${ss}`, title: ss === 'removed' ? 'Otra computadora lo eliminó: el archivo está en la papelera de la carpeta. Desde el menú ⋯ podés volver a ponerlo en la carpeta o eliminarlo también acá.' : '' }, SYNC_LABEL[ss]) : null,
     more, menu);
   return sheet;
 }
@@ -178,7 +291,7 @@ async function confirmDelete(app, p) {
   const ok = await confirmDialog({
     title: 'Eliminar proyecto',
     text: `¿Eliminar «${p.meta.name || 'proyecto'}» y ${p.maps.length === 1 ? 'su mapa' : `sus ${p.maps.length} mapas`} de esta computadora?`,
-    note: 'No se puede deshacer. Si lo vas a necesitar, exportalo antes.', ok: 'Eliminar', danger: true,
+    note: syncState(p) === 'folder' ? 'También sale de la carpeta: el archivo pasa a su subcarpeta «papelera» (de ahí se puede recuperar) y las otras computadoras lo ven como quitado.' : 'No se puede deshacer. Si lo vas a necesitar, exportalo antes.', ok: 'Eliminar', danger: true,
   });
   if (!ok) return;
   await deleteProject(p.id);

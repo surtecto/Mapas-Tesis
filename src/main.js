@@ -15,8 +15,11 @@ import { History, normalizeState, loadLocal, serializeState, newText } from './s
 import { TEMPLATES } from './templates.js';
 import {
   getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject, snapshotMap, restorePrev,
-  exportProject, importProject, migrateLegacy, defaultMeta,
+  exportProject, importProject, migrateLegacy, defaultMeta, onProjectChange,
 } from './library.js';
+import {
+  initFolder, folderStatus, onFolderStatus, syncAll, syncProject, scheduleProjectWrite, flushWrites, trashProject, resolveRemote, reconnectFolder,
+} from './folder.js';
 import { buildFirstMap } from './starter.js';
 import { cachePrune } from './layercache.js';
 import { renderHome, renderWizard, metaFields } from './ui/home.js';
@@ -75,10 +78,17 @@ class App {
       }
     } catch (e) { /* noop */ }
     this.setupChannel();
+    await this.setupFolder();
     setTimeout(() => cachePrune(), 8000); // las teselas guardadas de más de 4 meses se descartan
     window.addEventListener('hashchange', () => this.route());
     window.addEventListener('beforeunload', () => { if (this.current && this.state) this.saveCurrent({ sync: true }); });
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && this.current) this.saveCurrent({ thumb: true }); });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        if (this.current) this.saveCurrent({ thumb: true }).then(() => flushWrites(() => this.openProjectId()));
+        else flushWrites(() => this.openProjectId());
+      } else this.folderCheck();
+    });
+    window.addEventListener('focus', () => this.folderCheck());
     await this.route();
   }
 
@@ -98,6 +108,88 @@ class App {
   }
 
   setHash(h) { if (location.hash !== h) history.replaceState(null, '', h); }
+
+  // ---------- carpeta de proyectos ----------
+  openProjectId() { return this.current && !document.body.classList.contains('on-home') ? this.current.projectId : null; }
+  async setupFolder() {
+    try { await initFolder(); } catch (e) { /* sin carpeta */ }
+    onProjectChange((id, kind, p) => {
+      if (kind === 'delete') trashProject(p);
+      else scheduleProjectWrite(id, () => this.openProjectId(), (pid, r) => this.afterFolderSync(pid, r));
+    });
+    onFolderStatus(() => this.paintFolderState());
+    const fb = document.getElementById('folder-state');
+    if (fb) fb.addEventListener('click', () => this.folderButton());
+    this.paintFolderState();
+  }
+  paintFolderState() {
+    const b = document.getElementById('folder-state');
+    if (!b) return;
+    const f = folderStatus();
+    b.hidden = !f.linked;
+    if (!f.linked) return;
+    b.classList.toggle('warn', !f.ready || !!f.error);
+    b.classList.toggle('busy', f.ready && (f.busy || f.pending));
+    const t = f.lastSync ? new Date(f.lastSync).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
+    b.textContent = !f.ready ? 'Carpeta: dar permiso' : f.error ? 'Carpeta: revisar' : (f.busy || f.pending) ? 'Carpeta…' : 'En la carpeta';
+    b.title = !f.ready ? `La carpeta «${f.name}» necesita permiso otra vez: tocá para darlo. Mientras tanto, todo se guarda en esta computadora.`
+      : f.error ? `${f.error} Tocá para reintentar.`
+        : `Guardado también en la carpeta «${f.name}»${t ? ` (última vez: ${t})` : ''}. Otras computadoras que usen la misma carpeta ven este proyecto.`;
+  }
+  async folderButton() {
+    const f = folderStatus();
+    if (!f.ready) { const ok = await reconnectFolder(); if (!ok) { this.toast('Sin permiso, la carpeta no se usa: los cambios quedan en esta computadora.', 'warn'); return; } }
+    await this.folderCheck(true);
+  }
+  // al volver a la ventana: lo que cambió en otra computadora entra; si es el proyecto abierto, se pregunta
+  async folderCheck(force = false) {
+    const f = folderStatus();
+    if (!f.ready || document.visibilityState === 'hidden') return;
+    if (!force && this._lastFolderCheck && Date.now() - this._lastFolderCheck < 8000) return;
+    this._lastFolderCheck = Date.now();
+    if (document.body.classList.contains('on-home')) {
+      const res = await syncAll();
+      if (res.imported.length || res.updated.length || res.conflicts.length || res.removed.length) {
+        this.reportSync(res);
+        if (document.body.classList.contains('on-home')) renderHome(this, { sync: false });
+      }
+      return;
+    }
+    if (!this.current) return;
+    const r = await syncProject(this.current.projectId, { openId: this.current.projectId });
+    this.afterFolderSync(this.current.projectId, r);
+  }
+  reportSync(res) {
+    const parts = [];
+    if (res.imported.length) parts.push(`${res.imported.length} proyecto${res.imported.length === 1 ? ' nuevo llegó' : 's nuevos llegaron'} desde la carpeta`);
+    if (res.updated.length) parts.push(`${res.updated.length} se actualizó con cambios de otra computadora`);
+    if (res.conflicts.length) parts.push(`${res.conflicts.length} cambió en dos computadoras a la vez: la otra versión quedó como proyecto aparte`);
+    if (parts.length) this.toast(`${parts.join('; ')}.`, res.conflicts.length ? 'warn' : 'info');
+  }
+  async afterFolderSync(pid, r) {
+    if (!r) return;
+    if (r.conflict) this.toast(`El proyecto cambió también en otra computadora: esa versión quedó aparte, en el inicio, como «${r.conflict.meta.name}». La de acá sigue siendo la principal.`, 'warn');
+    if (r.remoteNewer && this.current && this.current.projectId === pid && !this._askingRemote) {
+      this._askingRemote = true;
+      const when = r.guardado ? new Date(r.guardado).toLocaleString('es-AR', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+      const load = await confirmDialog({
+        title: 'Este proyecto cambió en otra computadora',
+        text: `${r.equipo ? `«${r.equipo}»` : 'Otra computadora'} guardó en la carpeta una versión más nueva${when ? ` (${when})` : ''}. ¿Cuál querés usar acá?`,
+        note: 'Si seguís con la de acá, la otra no se pierde: queda como proyecto aparte en el inicio. Si cargás la otra, lo que ves ahora queda como «Volver a como estaba al abrirlo».',
+        ok: 'Cargar la otra versión', cancel: 'Seguir con la de acá',
+      });
+      try {
+        this._loadingRemote = true;
+        const out = await resolveRemote(pid, load ? 'load' : 'keep');
+        if (load && out === 'loaded' && this.current && this.current.projectId === pid) {
+          const mid = this.current.mapId;
+          this.current = null;
+          await this.openProject(pid, mid, { snapshot: false });
+          this.toast('Cargada la versión de la otra computadora.');
+        } else if (out && out.copy) this.toast(`La versión de la otra computadora quedó como «${out.copy.meta.name}».`);
+      } finally { this._loadingRemote = false; this._askingRemote = false; }
+    }
+  }
   goHome() { if (location.hash === '#/' || location.hash === '') this.route(); else location.hash = '#/'; }
   newProject() { location.hash = '#/nuevo'; }
 
@@ -170,7 +262,7 @@ class App {
 
   async saveCurrent({ thumb = false, sync = false } = {}) {
     const cur = this.current;
-    if (!cur || !this.state) return;
+    if (!cur || !this.state || this._loadingRemote) return;
     const json = serializeState(this.state);
     let thumbUrl = null;
     if (thumb && this.editorReady && !document.getElementById('app').hidden) thumbUrl = this.captureThumb();

@@ -25,6 +25,13 @@ export function defaultMeta(over = {}) {
 const now = () => new Date().toISOString();
 const clean = (state) => JSON.parse(JSON.stringify(state, (k, v) => (k.startsWith('_') ? undefined : v)));
 
+// Cambios de contenido: 'changed' se mueve solo cuando cambia algo del proyecto (no al abrirlo ni al rehacer la miniatura).
+// La carpeta de proyectos se entera por este aviso y guarda el archivo.
+let changeListener = null;
+export function onProjectChange(fn) { changeListener = fn; }
+function notify(id, kind = 'change', extra) { try { if (changeListener) changeListener(id, kind, extra); } catch (e) { /* noop */ } }
+function stamp(p) { const t = now(); p.updated = t; p.changed = t; return p; }
+
 // ---------- proyectos ----------
 export async function listProjects() {
   const projects = await dbAll('proyectos');
@@ -45,13 +52,14 @@ export async function listProjects() {
 export async function getProject(id) { return dbGet('proyectos', id); }
 
 export async function createProject(meta, firstMap) {
-  const p = { id: uid('P'), meta: defaultMeta(meta), created: now(), updated: now(), mapIds: [], activeMapId: null };
+  const p = stamp({ id: uid('P'), meta: defaultMeta(meta), created: now(), mapIds: [], activeMapId: null });
   await dbPut('proyectos', p);
   if (firstMap) {
     const m = await createMap(p.id, firstMap.name || 'Mapa 1', firstMap.state);
     p.mapIds = [m.id]; p.activeMapId = m.id;
     await dbPut('proyectos', p);
   }
+  notify(p.id);
   return p;
 }
 
@@ -59,8 +67,9 @@ export async function saveProjectMeta(id, meta) {
   const p = await dbGet('proyectos', id);
   if (!p) return null;
   p.meta = defaultMeta({ ...p.meta, ...meta });
-  p.updated = now();
+  stamp(p);
   await dbPut('proyectos', p);
+  notify(id);
   return p;
 }
 
@@ -73,6 +82,8 @@ export async function touchProject(id, patch = {}) {
 }
 
 export async function deleteProject(id) {
+  const p = await dbGet('proyectos', id);
+  if (p) notify(id, 'delete', p);
   const maps = await dbByIndex('mapas', 'projectId', id);
   for (const m of maps) await dbDelete('mapas', m.id);
   await dbDelete('proyectos', id);
@@ -83,7 +94,8 @@ export async function duplicateProject(id) {
   const p = await dbGet('proyectos', id);
   if (!p) return null;
   const maps = await dbByIndex('mapas', 'projectId', id);
-  const np = { ...p, id: uid('P'), meta: { ...p.meta, name: `${p.meta.name || 'Proyecto'} (copia)` }, created: now(), updated: now(), mapIds: [] };
+  const np = stamp({ ...p, id: uid('P'), meta: { ...p.meta, name: `${p.meta.name || 'Proyecto'} (copia)` }, created: now(), mapIds: [] });
+  delete np.sync;
   await dbPut('proyectos', np);
   const order = p.mapIds || [];
   maps.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
@@ -95,6 +107,7 @@ export async function duplicateProject(id) {
   }
   if (!np.activeMapId) np.activeMapId = np.mapIds[0] || null;
   await dbPut('proyectos', np);
+  notify(np.id);
   return np;
 }
 
@@ -105,8 +118,9 @@ export async function createMap(projectId, name, state) {
   const p = await dbGet('proyectos', projectId);
   if (p) {
     p.mapIds = [...(p.mapIds || []).filter((x) => x !== m.id), m.id];
-    p.activeMapId = m.id; p.updated = now();
+    p.activeMapId = m.id; stamp(p);
     await dbPut('proyectos', p);
+    notify(projectId);
   }
   return m;
 }
@@ -120,13 +134,21 @@ export async function listMaps(projectId) {
 export async function saveMap(id, state, { thumb, name } = {}) {
   const m = await dbGet('mapas', id);
   if (!m) return null;
-  m.state = clean(state);
-  m.updated = now();
+  const next = clean(state);
+  const changed = JSON.stringify(next) !== JSON.stringify(m.state) || (!!name && name !== m.name);
+  m.state = next;
+  if (changed) m.updated = now();
   if (thumb) m.thumb = thumb;
   if (name) m.name = name;
   await dbPut('mapas', m);
   const p = await dbGet('proyectos', m.projectId);
-  if (p) { p.updated = m.updated; p.activeMapId = id; await dbPut('proyectos', p); }
+  if (p && (changed || p.activeMapId !== id)) {
+    if (changed) stamp(p);
+    p.activeMapId = id;
+    await dbPut('proyectos', p);
+  }
+  if (p && changed) notify(p.id);
+  m.changed = changed;
   return m;
 }
 // Copia de resguardo: el estado del mapa tal como estaba al abrirlo (se puede volver a él)
@@ -143,6 +165,7 @@ export async function restorePrev(id) {
   m.state = m.prev.state; m.name = m.prev.name || m.name; m.updated = now();
   m.prev = cur; // se puede ir y volver
   await dbPut('mapas', m);
+  await stampProject(m.projectId);
   return m;
 }
 export async function renameMap(id, name) {
@@ -150,6 +173,14 @@ export async function renameMap(id, name) {
   if (!m) return;
   m.name = name; m.updated = now();
   await dbPut('mapas', m);
+  await stampProject(m.projectId);
+}
+async function stampProject(id) {
+  const p = await dbGet('proyectos', id);
+  if (!p) return;
+  stamp(p);
+  await dbPut('proyectos', p);
+  notify(id);
 }
 export async function duplicateMap(id, name) {
   const m = await dbGet('mapas', id);
@@ -164,14 +195,15 @@ export async function deleteMap(id) {
   if (p) {
     p.mapIds = (p.mapIds || []).filter((x) => x !== id);
     if (p.activeMapId === id) p.activeMapId = p.mapIds[0] || null;
-    p.updated = now();
+    stamp(p);
     await dbPut('proyectos', p);
+    notify(p.id);
   }
   await collectImages();
 }
 
 // ---------- imágenes huérfanas ----------
-function imageKeysOf(state) {
+export function imageKeysOf(state) {
   const keys = new Set();
   ((state && state.interp && state.interp.sources) || []).forEach((s) => s.key && keys.add(s.key));
   if (state && state.modelRef && state.modelRef.key) keys.add(state.modelRef.key);
@@ -234,4 +266,69 @@ export async function migrateLegacy(legacyState) {
     localStorage.setItem('mapas-tesis:migrado', p.id);
     return { project: p, hadOthers: existing.length > 0 };
   } catch (e) { return null; }
+}
+
+// ---------- carpeta de proyectos ----------
+// Un proyecto en la carpeta conserva sus ids: así cada computadora sabe que es el mismo y no una copia.
+export const FOLDER_FORMAT = 'mapas-tesis-carpeta';
+export async function exportForFolder(id, device) {
+  const p = await dbGet('proyectos', id);
+  if (!p) return null;
+  const maps = await listMaps(id);
+  const keys = new Set();
+  maps.forEach((m) => imageKeysOf(m.state).forEach((k) => keys.add(k)));
+  return {
+    formato: FOLDER_FORMAT, version: 1, guardado: now(), equipo: device || '',
+    proyecto: { id: p.id, meta: p.meta, created: p.created, changed: p.changed || p.updated, mapIds: maps.map((m) => m.id), activeMapId: p.activeMapId },
+    mapas: maps.map((m) => ({ id: m.id, name: m.name, state: m.state, thumb: m.thumb || null, updated: m.updated })),
+    imagenes: {},
+    _keys: [...keys],
+  };
+}
+
+// Reemplaza en esta computadora el proyecto por la versión de la carpeta (mismos ids). El estado anterior de cada mapa
+// queda como resguardo («Volver a como estaba al abrirlo»). No avisa cambios: no tiene que volver a escribirse.
+export async function applyFolderProject(obj) {
+  const fp = obj.proyecto;
+  const local = await dbGet('proyectos', fp.id);
+  const localMaps = local ? await dbByIndex('mapas', 'projectId', fp.id) : [];
+  const keep = new Set((obj.mapas || []).map((m) => m.id));
+  for (const m of localMaps) if (!keep.has(m.id)) await dbDelete('mapas', m.id);
+  for (const m of obj.mapas || []) {
+    const old = localMaps.find((x) => x.id === m.id);
+    const rec = { id: m.id, projectId: fp.id, name: m.name, state: m.state, updated: m.updated || fp.changed, thumb: m.thumb || (old && old.thumb) || null };
+    if (old && JSON.stringify(old.state) !== JSON.stringify(m.state)) rec.prev = { state: old.state, updated: old.updated, name: old.name, taken: now() };
+    else if (old && old.prev) rec.prev = old.prev;
+    await dbPut('mapas', rec);
+  }
+  const mapIds = (obj.mapas || []).map((m) => m.id);
+  const p = {
+    ...(local || {}), id: fp.id, meta: defaultMeta(fp.meta), created: fp.created || now(), updated: fp.changed || now(), changed: fp.changed || now(), mapIds,
+    activeMapId: local && keep.has(local.activeMapId) ? local.activeMapId : (keep.has(fp.activeMapId) ? fp.activeMapId : mapIds[0] || null),
+  };
+  await dbPut('proyectos', p);
+  return p;
+}
+
+// Copia independiente (ids nuevos) de una versión de la carpeta: se usa cuando las dos computadoras cambiaron lo mismo
+export async function copyFolderProjectAs(obj, name) {
+  const fp = obj.proyecto;
+  const p = await createProject({ ...fp.meta, name });
+  let active = null;
+  for (const m of obj.mapas || []) {
+    const nm = await createMap(p.id, m.name, m.state);
+    if (m.thumb) { nm.thumb = m.thumb; await dbPut('mapas', nm); }
+    if (m.id === fp.activeMapId) active = nm.id;
+  }
+  if (active) await touchProject(p.id, { activeMapId: active });
+  return dbGet('proyectos', p.id);
+}
+
+// Solo toca el registro de sincronización, sin mover las fechas del proyecto
+export async function setProjectSync(id, sync) {
+  const p = await dbGet('proyectos', id);
+  if (!p) return null;
+  if (sync == null) delete p.sync; else p.sync = sync;
+  await dbPut('proyectos', p);
+  return p;
 }

@@ -1,6 +1,6 @@
 {
   "name": "mapas-tesis",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Generador de mapas para tesis: proyectos por computadora, servicios oficiales argentinos como vectores editables, imágenes satelitales en el tiempo, coberturas, análisis espacial, destinos de la figura y mapas de interpretación sobre planos históricos",
   "scripts": {
     "build": "node tools/build.mjs",

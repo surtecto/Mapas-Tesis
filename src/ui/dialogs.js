@@ -25,14 +25,16 @@ export function formDialog({ title, body, ok = 'Aceptar', cancel = 'Cancelar', d
   const msg = el('p', { class: 'dlg-msg', hidden: true });
   return new Promise((resolve) => {
     let done = false;
-    const finish = (v) => { if (done) return; done = true; d.close(); resolve(v); };
+    // el aviso de cierre de un diálogo anterior no tiene que cerrar el siguiente (dos diálogos encadenados)
+    const onClose = () => { if (!d.open) finish(false); };
+    const finish = (v) => { if (done) return; done = true; d.removeEventListener('close', onClose); if (d.open) d.close(); resolve(v); };
     const okBtn = el('button', { type: 'button', class: `btn ${danger ? 'danger' : 'primary'}`, onclick: () => {
       const v = validate ? validate() : true;
       if (v !== true) { msg.textContent = v || 'Revisá los datos.'; msg.hidden = false; return; }
       finish(true);
     } }, ok);
     b.append(body, msg, el('div', { class: 'btn-row end dlg-actions' }, cancel ? el('button', { type: 'button', class: 'btn ghost', onclick: () => finish(false) }, cancel) : null, okBtn));
-    d.addEventListener('close', () => finish(false), { once: true });
+    d.addEventListener('close', onClose);
     d.onkeydown = (e) => {
       if (e.key === 'Enter' && e.target.tagName === 'INPUT' && e.target.type !== 'checkbox') { e.preventDefault(); okBtn.click(); }
     };
