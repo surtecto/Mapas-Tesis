@@ -11,13 +11,22 @@ function fnv(s) {
   return (h >>> 0).toString(36);
 }
 
-// Id del servidor si lo trae (WFS y ArcGIS lo traen); si no, una huella de sus atributos,
+// GeoServer inventa ids pasajeros (capa.fid-3a1b_18f…_-7ffe) cuando la tabla o vista no tiene clave:
+// cambian en cada pedido, así que no sirven para reconocer un objeto
+export function stableId(f) {
+  const id = f.getId();
+  if (id == null || id === '') return null;
+  const s = String(id);
+  return /(^|\.)fid-[0-9a-f]+_[0-9a-f]+_/i.test(s) ? null : s;
+}
+
+// Id del servidor si es estable (WFS con clave, ArcGIS); si no, una huella de sus atributos,
 // que no depende de la proyección y por eso vale igual en el mapa principal, los zooms y la exportación.
 export function featureKey(f) {
   let k = keyCache.get(f);
   if (k) return k;
-  const id = f.getId();
-  if (id != null && id !== '') k = String(id);
+  const id = stableId(f);
+  if (id) k = id;
   else {
     const p = f.getProperties();
     const gname = f.getGeometryName();
@@ -114,4 +123,13 @@ export function featuresByKeys(olLayer, fids) {
   if (!src || !src.getFeatures) return [];
   const want = new Set(fids);
   return src.getFeatures().filter((f) => want.has(featureKey(f)));
+}
+
+// clave para no repetir un objeto que llega en dos teselas: id estable, o atributos + caja exacta
+export function dedupKey(f) {
+  const id = stableId(f);
+  if (id) return `i:${id}`;
+  const g = f.getGeometry();
+  const e = g ? g.getExtent().map((v) => v.toFixed(2)).join(',') : '';
+  return `h:${featureKey(f)}|${e}`;
 }

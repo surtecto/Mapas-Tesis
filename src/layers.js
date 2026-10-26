@@ -23,15 +23,14 @@ import { swapCoords, serverError } from './services.js';
 import { landcoverRenderingRule, yearTime, paintLabels } from './imagery.js';
 import { cacheGet, cachePut, gridTiles, FRESH_MS } from './layercache.js';
 import { EMBEDDED } from './embedded.js';
-import { ensureIds, featureKey } from './features.js';
+import { ensureIds, dedupKey } from './features.js';
 
-// agrega objetos sin repetir: los que traen id los descarta OpenLayers; los que no, por su huella de atributos
+// agrega objetos sin repetir los que llegan en dos teselas (por id estable, o por atributos y caja si el id es pasajero)
 function addUnique(src, feats) {
-  if (!src._keys) src._keys = new Set(src.getFeatures().filter((f) => f.getId() == null).map(featureKey));
+  if (!src._keys) src._keys = new Set(src.getFeatures().map(dedupKey));
   const out = [];
   for (const f of feats) {
-    if (f.getId() != null) { out.push(f); continue; }
-    const k = featureKey(f);
+    const k = dedupKey(f);
     if (src._keys.has(k)) continue;
     src._keys.add(k); out.push(f);
   }
