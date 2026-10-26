@@ -14,6 +14,7 @@ import {
   exportProject, importProject, migrateLegacy, defaultMeta,
 } from './library.js';
 import { buildFirstMap } from './starter.js';
+import { cachePrune } from './layercache.js';
 import { renderHome, renderWizard, metaFields } from './ui/home.js';
 import { confirmDialog, formDialog, promptDialog } from './ui/dialogs.js';
 import { renderThesisPanel } from './ui/thesisPanel.js';
@@ -70,6 +71,7 @@ class App {
       }
     } catch (e) { /* noop */ }
     this.setupChannel();
+    setTimeout(() => cachePrune(), 8000); // las teselas guardadas de más de 4 meses se descartan
     window.addEventListener('hashchange', () => this.route());
     window.addEventListener('beforeunload', () => { if (this.current && this.state) this.saveCurrent({ sync: true }); });
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && this.current) this.saveCurrent({ thumb: true }); });
@@ -853,7 +855,7 @@ class App {
     this.layerErrors.set(ls.uid, msg);
     // los errores de varias capas se agrupan en un solo aviso
     this._errBatch = this._errBatch || new Map();
-    this._errBatch.set(ls.uid, { name: ls.name, msg });
+    this._errBatch.set(ls.uid, { name: ls.name, msg, ign: /^ign-/.test(ls.def) });
     clearTimeout(this._errTimer);
     this._errTimer = setTimeout(() => {
       const items = [...this._errBatch.values()];
@@ -862,8 +864,9 @@ class App {
       this._lastErrToast = Date.now();
       const names = items.map((x) => `«${x.name}»`);
       const text = items.length === 1 ? `No se pudo cargar ${names[0]}: ${items[0].msg}.` : `No se pudieron cargar ${items.length} capas (${names.slice(0, 4).join(', ')}${items.length > 4 ? '…' : ''}): ${items[0].msg}.`;
-      const serverSide = items.some((x) => /HTTP 5\d\d|tardó|ocupado|sobrecargado/.test(x.msg));
-      this.toast(`${text} ${serverSide ? 'Es un problema del servidor, no de tu conexión: ya se reintentó y se vuelve a pedir al mover o acercar el mapa.' : 'Revisá la conexión o probá más tarde.'}`, serverSide ? 'warn' : 'error');
+      const serverSide = items.some((x) => /HTTP 5\d\d|tardó|ocupado|sobrecargado|no respondió/.test(x.msg));
+      const ign = items.some((x) => x.ign);
+      this.toast(`${text} ${serverSide ? `Es un problema del servidor, no de tu conexión: ya se reintentó y se vuelve a pedir al mover o acercar el mapa.${ign ? ' Mientras tanto, la base Argenmap del IGN (Capas › Bases IGN) llega por otro canal y suele funcionar.' : ''}` : 'Revisá la conexión o probá más tarde.'}`, serverSide ? 'warn' : 'error');
     }, 1200);
     this.renderLeftSoon();
   }

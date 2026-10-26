@@ -120,6 +120,11 @@ function layerBody(app, ls, def) {
     return body;
   }
   if (ls.def === 'svc') body.append(serviceEditor(app, ls, def));
+  if (def.type === 'wfs-view' || def.type === 'svc-wfs') {
+    const ol = app.mainCtx && app.mainCtx.olLayers.get(ls.uid);
+    const vs = ol && ol._viewSource;
+    if (vs && vs._cachedAt && Number.isFinite(vs._cachedAt)) body.append(el('p', { class: 'note' }, `Parte de esta capa se muestra con los datos guardados en esta computadora el ${new Date(vs._cachedAt).toLocaleDateString('es-AR')}: si el servidor no responde, el mapa se sigue viendo y exportando. Se renuevan solos cada semana.`));
+  }
   if (def.type === 'wfs-view') {
     body.append(el('p', { class: 'note' }, `Se pide al IGN solo lo que entra en la vista, a escalas mayores que 1:${(def.maxMpm * 1000).toLocaleString('es-AR')}. ${ls.params && ls.params.force ? 'Carga forzada a escala menor (puede tardar).' : ''}`));
     body.append(check(ls.params, 'force', 'Cargar también a escala menor (más lento)', { onChange: () => { ls.rev += 1; app.commit('layers'); } }));

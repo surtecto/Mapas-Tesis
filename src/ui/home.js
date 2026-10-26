@@ -24,6 +24,7 @@ import { searchPlaces } from './search.js';
 import { gkFaja } from '../projections.js';
 import { getDef } from '../catalog.js';
 import { confirmDialog } from './dialogs.js';
+import { cacheInfo, cacheClear } from '../layercache.js';
 
 const IGN = (n) => `https://wms.ign.gob.ar/geoserver/gwc/service/tms/1.0.0/${n}@EPSG%3A3857@png/{z}/{x}/{-y}.png`;
 const ESRI_IMG = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
@@ -65,7 +66,7 @@ function prepareRoot() {
 // ---------- inicio ----------
 export async function renderHome(app) {
   const root = prepareRoot();
-  const [projects, st] = await Promise.all([listProjects().catch((e) => { app.toast(e.message, 'error'); return []; }), storageInfo()]);
+  const [projects, st, lc] = await Promise.all([listProjects().catch((e) => { app.toast(e.message, 'error'); return []; }), storageInfo(), cacheInfo()]);
   const importInput = el('input', { type: 'file', accept: '.json,application/json', hidden: true });
   importInput.addEventListener('change', async () => {
     const f = importInput.files[0];
@@ -122,6 +123,12 @@ export async function renderHome(app) {
     list,
     el('footer', { class: 'home-foot' },
       el('p', {}, 'Los proyectos se guardan en este navegador mientras trabajás. Cada computadora tiene su propia planoteca y no pisa la de otra: para llevar un proyecto, exportalo e importalo allá.', usage ? ` ${usage}.` : ''),
+      lc.n ? el('p', {}, `Además, ${lc.n.toLocaleString('es-AR')} teselas de capas oficiales (${mb(lc.bytes)}) quedaron guardadas para que los mapas se vean aunque el servidor no responda. `,
+        el('button', { type: 'button', class: 'btn small ghost', onclick: async () => {
+          const ok = await confirmDialog({ title: 'Vaciar las capas guardadas', text: 'Se borran las copias locales de las capas oficiales. Los proyectos no se tocan; las capas se vuelven a pedir a sus servidores.', ok: 'Vaciar' });
+          if (!ok) return;
+          await cacheClear(); app.toast('Capas guardadas borradas.'); renderHome(app);
+        } }, 'Vaciar')) : null,
       st.persisted ? el('p', { class: 'ok-note' }, 'El navegador tiene orden de conservar estos proyectos.')
         : el('button', { type: 'button', class: 'btn small ghost', onclick: async () => {
           const ok = await requestPersistence();

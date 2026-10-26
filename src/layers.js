@@ -21,6 +21,7 @@ import { getRenderPixel } from 'ol/render.js';
 import { getDef, defOf, RAMPS } from './catalog.js';
 import { swapCoords, serverError } from './services.js';
 import { landcoverRenderingRule, yearTime, paintLabels } from './imagery.js';
+import { cacheGet, cachePut, gridTiles, FRESH_MS } from './layercache.js';
 import { EMBEDDED } from './embedded.js';
 import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
 import { hexToRgb, rgba, PT_MM } from './util.js';
@@ -399,11 +400,14 @@ function buildEsriFeatureSource(ls, def, mctx) {
 // Solo carga a escalas de detalle (def.maxMpm: metros de terreno por mm de papel); a escala menor la capa queda en espera.
 // ---------- pedidos robustos a servidores lentos ----------
 // Reintenta ante 429/502/503/504 (servidor ocupado o vencido por tiempo) con espera creciente
-export async function fetchRetry(url, { tries = 3 } = {}) {
+export async function fetchRetry(url, { tries = 3, timeout = 0 } = {}) {
   let last = null;
   for (let i = 0; i < tries; i++) {
     let r = null;
-    try { r = await fetch(url); } catch (e) { last = e; }
+    const ctl = timeout ? new AbortController() : null;
+    const tm = ctl ? setTimeout(() => ctl.abort(), timeout) : null;
+    try { r = await fetch(url, ctl ? { signal: ctl.signal } : undefined); } catch (e) { last = e.name === 'AbortError' ? Object.assign(new Error(`el servidor no respondió en ${Math.round(timeout / 1000)} s`), { status: 504 }) : e; }
+    if (tm) clearTimeout(tm);
     if (r && r.ok) return r;
     if (r) {
       last = new Error(r.status === 504 || r.status === 502 ? `el servidor tardó demasiado en responder (HTTP ${r.status})` : r.status === 503 || r.status === 429 ? `el servidor está ocupado (HTTP ${r.status})` : `HTTP ${r.status}`);
@@ -424,6 +428,25 @@ function splitLL(ll, maxDeg = 0.4) {
   }
   return out;
 }
+// Lee una tesela del caché local; si no está, la pide. Si está vieja, la muestra igual y la renueva en segundo plano.
+async function cachedJSON(key, url) {
+  const cached = await cacheGet(key);
+  const net = async () => {
+    const r = await fetchRetry(url, { tries: 2, timeout: 30000 });
+    const t = await r.text();
+    if (t.trim().startsWith('<')) throw new Error(serverError(t));
+    const obj = JSON.parse(t);
+    if (!obj || !Array.isArray(obj.features)) throw new Error(obj && obj.error ? obj.error.message || 'error del servidor' : 'el servidor no devolvió objetos');
+    cachePut(key, obj);
+    return obj;
+  };
+  if (cached) {
+    if (Date.now() - cached.t > FRESH_MS) net().catch(() => { /* el servidor sigue sin responder: queda lo guardado */ });
+    return { obj: cached.obj, t: cached.t, cached: true };
+  }
+  return { obj: await net(), cached: false };
+}
+
 async function runPool(jobs, n = 3) {
   const results = new Array(jobs.length);
   let k = 0;
@@ -436,6 +459,7 @@ async function runPool(jobs, n = 3) {
 // ---------- WFS del IGN pedido por la extensión de la vista ----------
 // Solo carga a escalas de detalle (def.maxMpm: metros de terreno por mm de papel); a escala menor la capa queda en espera.
 function buildWfsViewSource(ls, def, mctx) {
+  const tilesDone = new Set();
   const src = new VectorSource({
     wrapX: false,
     strategy: bboxStrategy,
@@ -451,28 +475,30 @@ function buildWfsViewSource(ls, def, mctx) {
       try { ll = transformExtent(extent, projection, 'EPSG:4326', 16); } catch (e) { failure(); return; }
       ll = [Math.max(-180, ll[0]), Math.max(-90, ll[1]), Math.min(180, ll[2]), Math.min(90, ll[3])];
       if (!(ll[2] > ll[0] && ll[3] > ll[1])) { success([]); return; }
+      // teselas fijas de la grilla: se pueden guardar y reutilizar aunque la vista cambie
+      const tiles = gridTiles(ll, ll[2] - ll[0]).filter((t) => !tilesDone.has(t.id)).slice(0, 48);
+      if (!tiles.length) { success([]); return; }
+      tiles.forEach((t) => tilesDone.add(t.id));
       src._pend = (src._pend || 0) + 1;
       src._loading = true;
-      const jobs = splitLL(ll).map((b) => async () => {
+      const jobs = tiles.map((t) => () => {
         const p = new URLSearchParams({
           service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: def.typeName, outputFormat: 'application/json',
-          srsName: 'EPSG:4326', bbox: `${b.map((v) => v.toFixed(5)).join(',')},EPSG:4326`, maxFeatures: '4000',
+          srsName: 'EPSG:4326', bbox: `${t.b.join(',')},EPSG:4326`, maxFeatures: '5000',
         });
-        const r = await fetchRetry(`${def.url}?${p.toString()}`);
-        const t = await r.text();
-        if (t.trim().startsWith('<')) throw new Error(serverError(t));
-        return JSON.parse(t);
+        return cachedJSON(`${def.url}|${def.typeName}|${t.id}`, `${def.url}?${p.toString()}`);
       });
       runPool(jobs, 3).then((results) => {
         const all = [];
         let failed = null;
-        for (const res of results) {
-          if (!res.ok) { failed = failed || res.e; continue; }
-          const feats = readFeatures(res.v, mctx.projection);
-          if ((res.v.features || []).length >= 4000) src._truncated = true;
-          all.push(...feats);
-        }
-        src.addFeatures(all); // los objetos repetidos entre cajas vecinas tienen el mismo id y no se duplican
+        results.forEach((res, i) => {
+          if (!res.ok) { failed = failed || res.e; tilesDone.delete(tiles[i].id); return; }
+          const obj = res.v.obj;
+          if ((obj.features || []).length >= 5000) src._truncated = true;
+          if (res.v.cached) src._cachedAt = Math.min(src._cachedAt || Infinity, res.v.t);
+          all.push(...readFeatures(obj, mctx.projection));
+        });
+        src.addFeatures(all); // los objetos que cruzan dos teselas tienen el mismo id y no se duplican
         if (failed) {
           if (mctx.onLayerError) mctx.onLayerError(ls, failed);
           failure(); // lo que faltó se vuelve a pedir al mover o acercar el mapa
@@ -512,12 +538,25 @@ function wfsGetFeatureUrl(def, ll, limit) {
 }
 
 async function fetchWfsFeatures(def, ll, projCode) {
-  const limit = ll ? 6000 : 25000;
-  const obj = await getJSONStrict(wfsGetFeatureUrl(def, ll, limit));
-  if (def.swap) (obj.features || []).forEach((f) => { if (f.geometry && f.geometry.coordinates) f.geometry.coordinates = swapCoords(f.geometry.coordinates); });
-  const feats = readFeatures(obj, projCode);
-  feats._truncated = (obj.features || []).length >= limit;
-  return feats;
+  const one = async (box, limit) => {
+    const { obj } = await cachedJSON(`${def.url}|${def.typeName}|${def.cql || ''}|${box ? box.join(',') : 'todo'}`, wfsGetFeatureUrl(def, box, limit));
+    if (obj && obj.error) throw new Error(obj.error.message || 'error del servidor');
+    const o = def.swap ? { ...obj, features: (obj.features || []).map((f) => (f.geometry && f.geometry.coordinates ? { ...f, geometry: { ...f.geometry, coordinates: swapCoords(f.geometry.coordinates) } } : f)) } : obj;
+    const feats = readFeatures(o, projCode);
+    feats._truncated = (obj.features || []).length >= limit;
+    return feats;
+  };
+  if (!ll) return one(null, 25000);
+  const tiles = gridTiles(ll, ll[2] - ll[0]).slice(0, 48);
+  const results = await runPool(tiles.map((t) => () => one(t.b, 5000)), 3);
+  const bad = results.find((r) => !r.ok);
+  if (bad && results.every((r) => !r.ok)) throw bad.e;
+  const all = [];
+  let trunc = false;
+  results.forEach((r) => { if (r.ok) { all.push(...r.v); trunc = trunc || r.v._truncated; } });
+  all._truncated = trunc;
+  all._partial = !!bad;
+  return all;
 }
 
 async function fetchArcgisFeatures(def, ll, projCode, mPerPx) {
