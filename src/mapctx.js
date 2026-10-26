@@ -56,6 +56,7 @@ export class MapCtx {
   getLayerState(uid) { return this.app.state.layers.find((l) => l.uid === uid); }
   inset() { return this.insetId ? this.app.state.insets.find((z) => z.id === this.insetId) : null; }
   onLayerError(ls, err) { if (this.app.onLayerError) this.app.onLayerError(ls, err, this); }
+  onLayerOk(ls) { if (this.app.onLayerOk && this.role === 'main' && !this.forExport) this.app.onLayerOk(ls); }
 
   computeProjection() {
     const st = this.app.state;

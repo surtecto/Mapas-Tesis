@@ -397,6 +397,44 @@ function buildEsriFeatureSource(ls, def, mctx) {
 
 // ---------- WFS del IGN pedido por la extensión de la vista ----------
 // Solo carga a escalas de detalle (def.maxMpm: metros de terreno por mm de papel); a escala menor la capa queda en espera.
+// ---------- pedidos robustos a servidores lentos ----------
+// Reintenta ante 429/502/503/504 (servidor ocupado o vencido por tiempo) con espera creciente
+export async function fetchRetry(url, { tries = 3 } = {}) {
+  let last = null;
+  for (let i = 0; i < tries; i++) {
+    let r = null;
+    try { r = await fetch(url); } catch (e) { last = e; }
+    if (r && r.ok) return r;
+    if (r) {
+      last = new Error(r.status === 504 || r.status === 502 ? `el servidor tardó demasiado en responder (HTTP ${r.status})` : r.status === 503 || r.status === 429 ? `el servidor está ocupado (HTTP ${r.status})` : `HTTP ${r.status}`);
+      last.status = r.status;
+      if (![429, 502, 503, 504].includes(r.status)) throw last;
+    }
+    if (i < tries - 1) await new Promise((res) => setTimeout(res, 1500 * (i + 1) ** 2));
+  }
+  throw last;
+}
+// Parte una caja grande en pedidos más chicos (hasta 3 × 3): cada uno tarda menos en el servidor
+function splitLL(ll, maxDeg = 0.4) {
+  const nx = Math.min(3, Math.max(1, Math.ceil((ll[2] - ll[0]) / maxDeg)));
+  const ny = Math.min(3, Math.max(1, Math.ceil((ll[3] - ll[1]) / maxDeg)));
+  const out = [];
+  for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+    out.push([ll[0] + ((ll[2] - ll[0]) * i) / nx, ll[1] + ((ll[3] - ll[1]) * j) / ny, ll[0] + ((ll[2] - ll[0]) * (i + 1)) / nx, ll[1] + ((ll[3] - ll[1]) * (j + 1)) / ny]);
+  }
+  return out;
+}
+async function runPool(jobs, n = 3) {
+  const results = new Array(jobs.length);
+  let k = 0;
+  await Promise.all(Array.from({ length: Math.min(n, jobs.length) }, async () => {
+    while (k < jobs.length) { const i = k++; try { results[i] = { ok: true, v: await jobs[i]() }; } catch (e) { results[i] = { ok: false, e }; } }
+  }));
+  return results;
+}
+
+// ---------- WFS del IGN pedido por la extensión de la vista ----------
+// Solo carga a escalas de detalle (def.maxMpm: metros de terreno por mm de papel); a escala menor la capa queda en espera.
 function buildWfsViewSource(ls, def, mctx) {
   const src = new VectorSource({
     wrapX: false,
@@ -413,20 +451,35 @@ function buildWfsViewSource(ls, def, mctx) {
       try { ll = transformExtent(extent, projection, 'EPSG:4326', 16); } catch (e) { failure(); return; }
       ll = [Math.max(-180, ll[0]), Math.max(-90, ll[1]), Math.min(180, ll[2]), Math.min(90, ll[3])];
       if (!(ll[2] > ll[0] && ll[3] > ll[1])) { success([]); return; }
-      const p = new URLSearchParams({
-        service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: def.typeName, outputFormat: 'application/json',
-        srsName: 'EPSG:4326', bbox: `${ll.map((v) => v.toFixed(5)).join(',')},EPSG:4326`, maxFeatures: '6000',
-      });
       src._pend = (src._pend || 0) + 1;
       src._loading = true;
-      fetch(`${def.url}?${p.toString()}`).then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); }).then((obj) => {
-        const feats = readFeatures(obj, mctx.projection);
-        src.addFeatures(feats);
-        if ((obj.features || []).length >= 6000) src._truncated = true;
-        success(feats);
-      }).catch((err) => {
-        if (mctx.onLayerError) mctx.onLayerError(ls, err);
-        failure();
+      const jobs = splitLL(ll).map((b) => async () => {
+        const p = new URLSearchParams({
+          service: 'WFS', version: '1.1.0', request: 'GetFeature', typeName: def.typeName, outputFormat: 'application/json',
+          srsName: 'EPSG:4326', bbox: `${b.map((v) => v.toFixed(5)).join(',')},EPSG:4326`, maxFeatures: '4000',
+        });
+        const r = await fetchRetry(`${def.url}?${p.toString()}`);
+        const t = await r.text();
+        if (t.trim().startsWith('<')) throw new Error(serverError(t));
+        return JSON.parse(t);
+      });
+      runPool(jobs, 3).then((results) => {
+        const all = [];
+        let failed = null;
+        for (const res of results) {
+          if (!res.ok) { failed = failed || res.e; continue; }
+          const feats = readFeatures(res.v, mctx.projection);
+          if ((res.v.features || []).length >= 4000) src._truncated = true;
+          all.push(...feats);
+        }
+        src.addFeatures(all); // los objetos repetidos entre cajas vecinas tienen el mismo id y no se duplican
+        if (failed) {
+          if (mctx.onLayerError) mctx.onLayerError(ls, failed);
+          failure(); // lo que faltó se vuelve a pedir al mover o acercar el mapa
+        } else {
+          if (mctx.onLayerOk) mctx.onLayerOk(ls);
+          success(all);
+        }
       }).finally(() => { src._pend -= 1; src._loading = src._pend > 0; });
     },
   });
@@ -437,8 +490,7 @@ function buildWfsViewSource(ls, def, mctx) {
 const svcWholeCache = new Map(); // descarga completa compartida entre el mapa, los recuadros y la exportación
 
 async function getJSONStrict(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const r = await fetchRetry(url);
   const t = await r.text();
   let j;
   try { j = JSON.parse(t); } catch (e) { throw new Error(t.trim().startsWith('<') ? serverError(t) : 'respuesta ilegible'); }
@@ -532,6 +584,7 @@ function buildServiceVectorSource(ls, def, mctx) {
       job.then((feats) => {
         src.addFeatures(feats);
         src._truncated = !!feats._truncated;
+        if (mctx.onLayerOk) mctx.onLayerOk(ls);
         success(feats);
       }).catch((err) => {
         if (mctx.onLayerError) mctx.onLayerError(ls, err);

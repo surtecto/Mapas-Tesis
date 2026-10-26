@@ -862,9 +862,13 @@ class App {
       this._lastErrToast = Date.now();
       const names = items.map((x) => `«${x.name}»`);
       const text = items.length === 1 ? `No se pudo cargar ${names[0]}: ${items[0].msg}.` : `No se pudieron cargar ${items.length} capas (${names.slice(0, 4).join(', ')}${items.length > 4 ? '…' : ''}): ${items[0].msg}.`;
-      this.toast(`${text} Revisá la conexión o probá más tarde.`, 'error');
+      const serverSide = items.some((x) => /HTTP 5\d\d|tardó|ocupado|sobrecargado/.test(x.msg));
+      this.toast(`${text} ${serverSide ? 'Es un problema del servidor, no de tu conexión: ya se reintentó y se vuelve a pedir al mover o acercar el mapa.' : 'Revisá la conexión o probá más tarde.'}`, serverSide ? 'warn' : 'error');
     }, 1200);
     this.renderLeftSoon();
+  }
+  onLayerOk(ls) {
+    if (this.layerErrors.has(ls.uid)) { this.layerErrors.delete(ls.uid); this.renderLeftSoon(); }
   }
   onTileError() { this._tileErrors = (this._tileErrors || 0) + 1; this.updateStatusSoon(); }
   onTileLoad(d) { this.loading = Math.max(0, this.loading + d); this.updateStatusSoon(); }
