@@ -1,6 +1,7 @@
 // Simbología: símbolos puntuales, tramas, guiones y funciones de estilo de OpenLayers
 import { Style, Stroke, Fill, Text } from 'ol/style.js';
 import { PT_MM, rgba } from './util.js';
+import { featureKey, groupOf } from './features.js';
 
 export const SHAPES = [
   ['circle', 'Círculo'], ['square', 'Cuadrado'], ['triangle', 'Triángulo'], ['triangle-down', 'Triángulo invertido'],
@@ -323,15 +324,18 @@ export function makeVectorStyleFn(getLayerState, def, ctx) {
     if (!layerState) return null;
     const flt = layerState.params && layerState.params.filter;
     if (flt && flt.length && !passFilter(feature, flt, layerState.params.filterMode)) return null;
-    const st = layerState.style;
+    // característica propia (objetos elegidos a mano): su estilo manda sobre el de la capa y sus categorías
+    const grp = layerState.groups && layerState.groups.length ? groupOf(layerState, featureKey(feature)) : null;
+    if (grp && grp.hidden) return null;
+    const st = grp ? { ...layerState.style, polygon: grp.polygon || layerState.style.polygon, line: grp.line || layerState.style.line, point: grp.point || layerState.style.point } : layerState.style;
     if (layerState._styleVersion !== cacheVersion || ctx.pxPerMm !== cacheScale) {
       cache.clear(); cacheVersion = layerState._styleVersion; cacheScale = ctx.pxPerMm;
     }
     const pxPerPt = ctx.pxPerMm * PT_MM;
     const geomType = feature.getGeometry() ? feature.getGeometry().getType() : 'Point';
-    const cat = st.categorize && st.categorize.field ? feature.get(st.categorize.field) : undefined;
-    const catColor = classify(st.categorize, cat);
-    if (st.categorize && st.categorize.field && st.categorize.hideOthers && catColor === undefined) return null;
+    const cat = !grp && st.categorize && st.categorize.field ? feature.get(st.categorize.field) : undefined;
+    const catColor = grp ? undefined : classify(st.categorize, cat);
+    if (!grp && st.categorize && st.categorize.field && st.categorize.hideOthers && catColor === undefined) return null;
     const lab = st.label || {};
     let text = '';
     let labelCfg = lab;
@@ -352,7 +356,7 @@ export function makeVectorStyleFn(getLayerState, def, ctx) {
       const v = Number(feature.get(st.point.sizeField));
       if (Number.isFinite(v)) propSize = propSymbolSize(st.point, v);
     }
-    const key = `${geomType}|${catColor || ''}|${text}|${feature.get('clase') || ''}|${propSize == null ? '' : propSize.toFixed(2)}`;
+    const key = `${geomType}|${catColor || ''}|${text}|${feature.get('clase') || ''}|${propSize == null ? '' : propSize.toFixed(2)}|${grp ? grp.id : ''}`;
     if (cache.has(key)) return cache.get(key);
     const styles = [];
     const isLine = geomType === 'LineString' || geomType === 'MultiLineString';

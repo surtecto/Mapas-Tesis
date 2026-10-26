@@ -843,3 +843,19 @@ dialog.svc-dialog { width: min(1280px, calc(100vw - 24px)); height: min(860px, c
 .an-out { margin: 6px 0; }
 .an-out .stat-table td { padding: 3px 4px; }
 .paper.mode-add { cursor: crosshair; }
+
+/* ---------- objetos elegidos en el mapa ---------- */
+.feat-insp .feat-layer { display: flex; flex-direction: column; gap: 1px; margin: 0 0 6px; padding: 6px 8px; border-left: 3px solid #e4007c; background: var(--panel-2); border-radius: 0 var(--radius-s) var(--radius-s) 0; }
+.feat-insp .feat-layer span { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.feat-insp .feat-layer strong { font-size: 13px; line-height: 1.25; color: var(--ink); }
+.feat-insp .feat-measure { font-variant-numeric: tabular-nums; font-size: 12.5px; color: var(--ink-2); margin: 0 0 8px; }
+.feat-insp .feat-sub { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-2); margin: 12px 0 4px; padding-top: 10px; border-top: 1px solid var(--rule); }
+.feat-insp .hint-line { font-size: 11px; color: var(--muted); margin-top: 12px; }
+.attr-table { width: 100%; border-collapse: collapse; font-size: 11.5px; table-layout: fixed; }
+.attr-table th, .attr-table td { text-align: left; padding: 3px 4px; border-bottom: 1px solid var(--rule); vertical-align: top; overflow-wrap: anywhere; }
+.attr-table th { width: 40%; font-weight: 600; color: var(--ink-2); font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace; font-size: 10.5px; }
+.attr-table td { font-variant-numeric: tabular-nums; }
+.grp-row { display: grid; grid-template-columns: 16px 1fr auto auto auto; align-items: center; gap: 6px; padding: 3px 0; border-bottom: 1px dotted var(--rule); }
+.grp-sw { width: 14px; height: 14px; border-radius: 2px; border: 1px solid rgba(0, 0, 0, 0.25); }
+.grp-name { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grp-n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }

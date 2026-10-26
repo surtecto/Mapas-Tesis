@@ -7,6 +7,7 @@ import { PROJECTIONS } from '../projections.js';
 import { legendItems } from '../overlay.js';
 import { siteBody } from './sitesPanel.js';
 import { featureEditor } from './interpPanel.js';
+import { featureInspector } from './featureInspector.js';
 
 const ALIGN = [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha']];
 
@@ -39,7 +40,8 @@ export function renderInspector(app, root) {
         el('li', {}, 'Los sitios se arrastran para corregir su posición.'),
         el('li', {}, 'Supr borra el elemento seleccionado; las flechas lo desplazan 0,5 mm (con Mayús, 5 mm).'),
         el('li', {}, 'Ctrl+Z deshace; Ctrl+Mayús+Z rehace.'),
-        el('li', {}, 'En la pestaña Interpretación, los trazos dibujados se tocan para editar su nombre, período, fuente y certeza.')),
+        el('li', {}, 'En la pestaña Interpretación, los trazos dibujados se tocan para editar su nombre, período, fuente y certeza.'),
+        el('li', {}, 'Un clic sobre un polígono, línea o punto de una capa lo elige para darle color y estilo propios; Mayús + clic suma más objetos.')),
     );
     return;
   }
@@ -67,6 +69,9 @@ export function renderInspector(app, root) {
     const s = st.sites.find((x) => x.id === sel.id);
     if (!s) return;
     root.append(title('Sitio de estudio'), siteBody(app, s));
+  } else if (sel.kind === 'feature') {
+    const n = (sel.fids || []).length;
+    root.append(title(n === 1 ? 'Objeto de una capa' : `${n} objetos de una capa`), featureInspector(app, sel));
   }
 }
 

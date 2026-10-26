@@ -23,6 +23,7 @@ import { swapCoords, serverError } from './services.js';
 import { landcoverRenderingRule, yearTime, paintLabels } from './imagery.js';
 import { cacheGet, cachePut, gridTiles, FRESH_MS } from './layercache.js';
 import { EMBEDDED } from './embedded.js';
+import { ensureIds } from './features.js';
 import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
 import { hexToRgb, rgba, PT_MM } from './util.js';
 import { lonLatTo, toLonLatFrom, metersPerUnit } from './projections.js';
@@ -825,7 +826,7 @@ function buildUserLayer(ls, mctx) {
   const key = `user:${ls.uid}:${ls.rev}|${mctx.projection}`;
   if (!vectorSources.has(key)) {
     const src = new VectorSource({ wrapX: false });
-    try { src.addFeatures(readFeatures(ls.data, mctx.projection)); } catch (e) { if (mctx.onLayerError) mctx.onLayerError(ls, e); }
+    try { src.addFeatures(readFeatures(ensureIds(ls.data), mctx.projection)); } catch (e) { if (mctx.onLayerError) mctx.onLayerError(ls, e); }
     vectorSources.set(key, src);
   }
   return vectorSources.get(key);

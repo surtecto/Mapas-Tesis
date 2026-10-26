@@ -2,6 +2,10 @@
 import Draw from 'ol/interaction/Draw.js';
 import Modify from 'ol/interaction/Modify.js';
 import VectorSource from 'ol/source/Vector.js';
+import VectorLayer from 'ol/layer/Vector.js';
+import Feature from 'ol/Feature.js';
+import { Style, Stroke, Fill, Circle as CircleStyle } from 'ol/style.js';
+import { featureKey, featuresByKeys } from './features.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
 import { transformExtent } from 'ol/proj.js';
 import { MapCtx } from './mapctx.js';
@@ -214,7 +218,7 @@ class App {
             if (!box) continue;
             const ox = box.offsetLeft, oy = box.offsetTop;
             box.querySelectorAll('.ol-layer canvas, canvas.ol-layer').forEach((cv) => {
-              if (!cv.width) return;
+              if (!cv.width || cv.closest('.cm-highlight')) return;
               const op = cv.parentNode.style.opacity || cv.style.opacity;
               x.globalAlpha = op === '' ? 1 : Number(op);
               const tr = cv.style.transform;
@@ -530,6 +534,20 @@ class App {
 
   wireMainMap() {
     const m = this.mainCtx.map;
+    // resaltado de los objetos elegidos: solo en pantalla, nunca entra en la exportación
+    const halo = new Stroke({ color: 'rgba(255,255,255,0.95)', width: 5.5, lineJoin: 'round' });
+    const mark = new Stroke({ color: '#e4007c', width: 2.2, lineDash: [7, 4], lineJoin: 'round' });
+    const hlStyles = {
+      area: [new Style({ stroke: halo, fill: new Fill({ color: 'rgba(228,0,124,0.10)' }) }), new Style({ stroke: mark })],
+      point: [new Style({ image: new CircleStyle({ radius: 10, stroke: halo }) }), new Style({ image: new CircleStyle({ radius: 10, stroke: mark }) })],
+    };
+    this.hlSource = new VectorSource({ wrapX: false });
+    this.hlLayer = new VectorLayer({
+      source: this.hlSource, zIndex: 1e6, className: 'cm-highlight', updateWhileAnimating: true, updateWhileInteracting: true,
+      style: (f) => (/Point/.test(f.getGeometry().getType()) ? hlStyles.point : hlStyles.area),
+    });
+    m.addLayer(this.hlLayer);
+    m.on('moveend', () => { if (this.selection && this.selection.kind === 'feature') this.refreshHighlightSoon(); });
     m.on('postrender', () => this.redraw());
     m.on('moveend', () => {
       if (this.mainCtx._applying) return;
@@ -813,7 +831,51 @@ class App {
     this.selection = sel;
     this.renderInspector();
     this.redraw();
+    this.refreshHighlight();
     document.body.classList.toggle('has-selection', !!sel);
+  }
+
+  // ---------- objetos de capas vectoriales ----------
+  selectableLayer(ls) {
+    if (!ls || !ls.visible || !ls.style) return false;
+    if (ls.def === 'user') return true;
+    const d = defOf(ls);
+    return !!(d && (d.kind === 'vector' || d.type === 'svc-wfs' || d.type === 'svc-arcgis') && d.type !== 'graticule' && d.type !== 'interp');
+  }
+  vectorFeatureAt(e) {
+    const pt = this.pointerMM(e);
+    if (this.scopeAt(pt).insetId) return null;
+    const m = this.mainCtx.map;
+    const px = m.getEventPixel(e);
+    let hit = null;
+    m.forEachFeatureAtPixel(px, (f, layer) => {
+      const ls = this.state.layers.find((l) => l.uid === layer.get('cmUid'));
+      if (!this.selectableLayer(ls)) return false;
+      hit = { ls, fid: featureKey(f) };
+      return true;
+    }, { layerFilter: (l) => !!l.get('cmUid') && l instanceof VectorLayer, hitTolerance: 4 });
+    return hit;
+  }
+  selectFeatures(layerUid, fids) {
+    if (!fids || !fids.length) { this.select(null); return; }
+    this.select({ kind: 'feature', id: layerUid, fids: [...new Set(fids)] });
+  }
+  refreshHighlight() {
+    if (!this.hlSource) return;
+    this.hlSource.clear();
+    const sel = this.selection;
+    if (!sel || sel.kind !== 'feature') return;
+    const feats = featuresByKeys(this.mainCtx.olLayers.get(sel.id), sel.fids);
+    this.hlSource.addFeatures(feats.filter((f) => f.getGeometry()).map((f) => new Feature(f.getGeometry().clone())));
+  }
+  refreshHighlightSoon() {
+    clearTimeout(this._hlT);
+    this._hlT = setTimeout(() => {
+      const before = this.hlSource.getFeatures().length;
+      this.refreshHighlight();
+      // si al moverse aparecen objetos elegidos que antes no estaban cargados, el inspector muestra sus atributos
+      if (!before && this.hlSource.getFeatures().length) this.renderInspector();
+    }, 250);
   }
 
   setMode(mode, draft) {
@@ -1175,8 +1237,15 @@ class App {
       if (d.kind === 'map') {
         if (!d.moved) {
           const fid = this.interpFeatureAt(e);
-          if (fid) { this.select({ kind: 'interp', id: fid }); if (this.ui.tab === 'interp') this.renderLeft(); }
-          else if (this.selection) this.select(null);
+          if (fid) { this.select({ kind: 'interp', id: fid }); if (this.ui.tab === 'interp') this.renderLeft(); return; }
+          const hit = this.analysisDraw || this.mode ? null : this.vectorFeatureAt(e);
+          if (hit) {
+            const cur = this.selection;
+            if (e.shiftKey && cur && cur.kind === 'feature' && cur.id === hit.ls.uid) {
+              const has = cur.fids.includes(hit.fid);
+              this.selectFeatures(hit.ls.uid, has ? cur.fids.filter((x) => x !== hit.fid) : [...cur.fids, hit.fid]);
+            } else this.selectFeatures(hit.ls.uid, [hit.fid]);
+          } else if (this.selection) this.select(null);
         }
         return;
       }
@@ -1245,7 +1314,7 @@ class App {
         return;
       }
       const sel = this.selection;
-      if (!sel) return;
+      if (!sel || sel.kind === 'feature') return;
       const st = this.state;
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();

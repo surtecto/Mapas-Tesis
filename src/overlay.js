@@ -661,10 +661,14 @@ export function legendItems(state) {
       }
       continue;
     }
-    if (!ls.visible || !ls.legend || !ls.legend.show || !ls.style) continue;
+    if (!ls.visible || !ls.style) continue;
     const def = ls.def === 'user' ? { geom: userGeomType(ls) } : defOf(ls);
     if (!def || !def.geom) continue;
     const st = ls.style;
+    // características propias (objetos elegidos a mano): una entrada cada una, aunque la capa no figure
+    const groupItems = (ls.groups || []).filter((g) => !g.hidden && g.legend !== false && g.fids && g.fids.length)
+      .map((g) => ({ key: `layer:${ls.uid}:g:${g.id}`, label: g.name, sym: symFromStyle(def.geom, { ...st, polygon: g.polygon || st.polygon, line: g.line || st.line, point: g.point || st.point }) }));
+    if (!ls.legend || !ls.legend.show) { items.push(...groupItems); continue; }
     const cz = st.categorize || {};
     const cat = cz.field && cz.mode === 'ranges' ? (cz.ranges || []).map((r) => [r.label || `${r.min}–${r.max}`, r.color])
       : cz.field && cz.values ? Object.entries(cz.values) : [];
@@ -675,15 +679,14 @@ export function legendItems(state) {
       const vals = [...new Set([nice(mx), nice(mx / 4), nice(mx / 16)])].filter((v) => v > 0);
       items.push({ key: `layer:${ls.uid}:titulo`, label: ls.legend.label || ls.name, sym: { type: 'point', cfg: { ...st.point, shape: 'none' } } });
       for (const v of vals) items.push({ key: `layer:${ls.uid}:v${v}`, label: `${v.toLocaleString('es-AR')}${st.point.sizeUnit ? ` ${st.point.sizeUnit}` : ''}`, sym: { type: 'point', trueSize: true, cfg: { ...st.point, size: propSymbolSize(st.point, v) } } });
-      continue;
-    }
-    if (cat.length && ls.legend.expand !== false) {
+    } else if (cat.length && ls.legend.expand !== false) {
       for (const [val, col] of cat) {
         items.push({ key: `layer:${ls.uid}:${val}`, label: val, sym: symFromStyle(def.geom, st, col) });
       }
     } else {
       items.push({ key: `layer:${ls.uid}`, label: ls.legend.label || ls.name, sym: symFromStyle(def.geom, st) });
     }
+    items.push(...groupItems);
   }
   for (const c of state.legend.custom || []) items.push({ key: `custom:${c.id}`, label: c.label, sym: c.sym });
   // personalizaciones

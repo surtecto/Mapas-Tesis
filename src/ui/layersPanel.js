@@ -2,6 +2,7 @@
 import { el, clear, uid } from '../util.js';
 import { field, inlineFields, num, color, select, check, range, button, details, text } from './forms.js';
 import { styleEditor, geomOf } from './styleEditor.js';
+import { groupsList } from './featureInspector.js';
 import { CATALOG, GROUPS, getDef, defOf, RAMPS, baseStyle, FONTS } from '../catalog.js';
 import { DASH_OPTIONS } from '../styles.js';
 import { newLayerState } from '../state.js';
@@ -131,7 +132,7 @@ function layerBody(app, ls, def) {
   }
   if (def.type === 'graticule') body.append(graticuleEditor(app, ls));
   else if (def.kind === 'vector') {
-    if (ls.style) body.append(styleEditor(app, ls));
+    if (ls.style) body.append(styleEditor(app, ls), groupsList(app, ls));
     if (ls.legend) {
       body.append(details('Leyenda', !!ls.legend.show,
         check(ls.legend, 'show', 'Incluir en la leyenda', { onChange: () => app.commit('overlay') }),

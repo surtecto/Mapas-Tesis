@@ -4,6 +4,16 @@ import { field, inlineFields, num, color, select, check, range, button, details,
 import { SHAPES, DASH_OPTIONS, PATTERNS, DECOS } from '../styles.js';
 import { FONTS, getDef, defOf } from '../catalog.js';
 import { PALETTES, paletteColors } from '../palette.js';
+import { classBreaks } from '../analysis.js';
+
+// nombres y valores que delatan un código (identificador) y no una magnitud
+const ID_NAME = /^(id|gid|fid|oid|objectid|object_id|ogc_fid|sitecode|site_code|cod|codigo|code|cuit|link|in1|cca|cde|clave|nro|numero)$|(_id|_cod|_code|codigo|sitecode)$/i;
+function looksLikeId(field, nums) {
+  if (ID_NAME.test(field)) return true;
+  if (nums.length < 8) return false;
+  const uniq = new Set(nums).size;
+  return uniq === nums.length && nums.every(Number.isInteger) && nums[nums.length - 1] - nums[0] > nums.length * 5;
+}
 
 export function geomOf(ls) {
   if (ls.def === 'user') {
@@ -115,21 +125,26 @@ function categorizeEditor(app, ls, flds) {
   if (!cz.mode) cz.mode = 'values';
   const fieldSel = select(cz, 'field', [['', 'Sin clasificar'], ...flds.map((f) => [f, f])], { onChange: () => { cz.values = {}; render(); app.styleChanged(ls); } });
   const modeSel = select(cz, 'mode', [['values', 'Valores únicos'], ['ranges', 'Rangos numéricos (períodos, cantidades)']], { onChange: () => { render(); app.styleChanged(ls); app.renderLeft(); } });
-  const palObj = { p: 'okabe' };
-  const palSel = select(palObj, 'p', PALETTES.map((p) => [p.id, p.name]));
-  const breaksObj = { n: 5, how: 'equal', manual: '' };
+  // la paleta elegida queda guardada en la capa: la que se ve en la lista es la que se usa al generar
+  if (!cz.palette || !PALETTES.some((p) => p.id === cz.palette)) cz.palette = cz.mode === 'ranges' ? 'periodos' : 'okabe';
+  const palObj = { get p() { return cz.palette; }, set p(v) { cz.palette = v; } };
+  const palSel = select(cz, 'palette', PALETTES.map((p) => [p.id, p.name]));
+  if (!cz.breaks) cz.breaks = { n: 5, how: 'jenks', manual: '' };
+  const breaksObj = cz.breaks;
+  const warn = el('p', { class: 'note warn-note' });
+  warn.hidden = true;
   const genRanges = () => {
     const nums = sampleFeatures(app, ls).map((f) => Number(f.get(cz.field))).filter(Number.isFinite).sort((a, b) => a - b);
     let br = [];
     if (breaksObj.manual.trim()) br = breaksObj.manual.split(/[;,\s]+/).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
     else if (nums.length) {
       const n = Math.max(2, Math.min(9, breaksObj.n));
-      if (breaksObj.how === 'quantile') for (let i = 0; i <= n; i++) br.push(nums[Math.min(nums.length - 1, Math.round((i / n) * (nums.length - 1)))]);
-      else { const a = nums[0], b = nums[nums.length - 1]; for (let i = 0; i <= n; i++) br.push(a + ((b - a) * i) / n); }
-      br = br.map((v) => Math.round(v * 100) / 100);
+      br = classBreaks(nums, n, breaksObj.how).map((v) => Math.round(v * 100) / 100);
     }
     br = [...new Set(br)];
     if (br.length < 2) { app.toast('No hay valores numéricos en la vista actual (o escribí los cortes a mano).', 'warn'); return; }
+    warn.hidden = !looksLikeId(cz.field, nums);
+    warn.textContent = `«${cz.field}» parece un código que identifica cada objeto, no una medida: ordenarlo en rangos agrupa números que no expresan cantidad ni intensidad. ¿Qué se quiere mostrar? Con «Valores únicos» cada código tiene su color; para comparar magnitudes conviene un atributo medido (superficie, caudal, población), y para destacar algunos objetos alcanza con tocarlos en el mapa.`;
     const cols = paletteColors(PALETTES.find((p) => p.id === palObj.p), br.length - 1);
     cz.ranges = [];
     for (let i = 0; i < br.length - 1; i++) cz.ranges.push({ min: i === 0 ? br[i] : br[i] + (Number.isInteger(br[i]) ? 1 : 0.01), max: br[i + 1], color: cols[i], label: '' });
@@ -149,15 +164,19 @@ function categorizeEditor(app, ls, flds) {
     app.styleChanged(ls);
     if (!arr.length) app.toast('La capa todavía no tiene datos cargados en la vista actual.');
   }, { kind: 'small' });
-  if (cz.mode === 'ranges') palObj.p = 'periodos';
   body.append(
     inlineFields(field('Clasificar por', fieldSel), field('Modo', modeSel)),
-    cz.mode === 'ranges' ? inlineFields(field('Clases', num(breaksObj, 'n', { min: 2, max: 9, step: 1 })), field('Método', select(breaksObj, 'how', [['equal', 'Intervalos iguales'], ['quantile', 'Cuantiles']]))) : null,
+    cz.mode === 'ranges' ? inlineFields(field('Clases', num(breaksObj, 'n', { min: 2, max: 9, step: 1 })), field('Método', select(breaksObj, 'how', [['jenks', 'Cortes naturales (Jenks)'], ['quantile', 'Cuantiles'], ['equal', 'Intervalos iguales'], ['stddev', 'Desvío estándar']]))) : null,
     cz.mode === 'ranges' ? field('Cortes a mano (opcional)', text(breaksObj, 'manual', { placeholder: '1825, 1850, 1870, 1885, 1900, 1925' })) : null,
     inlineFields(field('Paleta', palSel), el('div', { class: 'field' }, el('span', { class: 'label-spacer' }), cz.mode === 'ranges' ? button('Generar rangos', genRanges, { kind: 'small' }) : loadBtn)),
+    warn,
     list,
     check(cz, 'hideOthers', 'Ocultar elementos sin valor asignado', { onChange: () => app.styleChanged(ls) }),
   );
+  if (cz.mode === 'ranges' && cz.field && cz.ranges && cz.ranges.length) {
+    const nums = sampleFeatures(app, ls).map((f) => Number(f.get(cz.field))).filter(Number.isFinite).sort((a, b) => a - b);
+    if (looksLikeId(cz.field, nums)) { warn.hidden = false; warn.textContent = `«${cz.field}» parece un código que identifica cada objeto, no una medida: sus rangos no expresan cantidad. Probá «Valores únicos», un atributo medido, o tocá en el mapa los objetos que querés destacar.`; }
+  }
   render();
   return details('Colores por categoría (atributo)', !!cz.field, body);
 }
