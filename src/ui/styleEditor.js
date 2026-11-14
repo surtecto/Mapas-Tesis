@@ -56,12 +56,12 @@ export function styleEditor(app, ls) {
     const l = st.line;
     const decoDefault = (d) => (d === 'casing' ? '#3a3a3a' : ['double', 'rail'].includes(d) ? '#ffffff' : l.color);
     if (!l.decoColor && l.deco && l.deco !== 'none') l.decoColor = decoDefault(l.deco);
-    root.append(
+    root.append(...[
       inlineFields(field('Color', color(l, 'color', { onChange: changed })), field('Grosor', num(l, 'width', { min: 0, max: 8, step: 0.05, unit: 'pt', onChange: changed }))),
       inlineFields(field('Tipo de línea', select(l, 'dash', DASH_OPTIONS, { onChange: changed })), field('Opacidad', range(l, 'opacity', { onChange: changed, onInput: changed, format: (v) => `${Math.round(v * 100)}%` }))),
       field('Decoración', select(l, 'deco', DECOS, { onChange: (d) => { l.decoColor = decoDefault(d); changed(); app.renderLeft(); } })),
       l.deco && l.deco !== 'none' ? inlineFields(field('Color de la decoración', color(l, 'decoColor', { onChange: changed })),
-        ['casing', 'double', 'rail'].includes(l.deco) ? el('span') : field('Separación', num(l, 'decoSpacing', { min: 0.8, max: 30, step: 0.2, unit: 'mm', onChange: changed }))) : null,
+        ['casing', 'double', 'rail'].includes(l.deco) ? el('span') : field('Separación', num(l, 'decoSpacing', { min: 0.8, max: 30, step: 0.2, unit: 'mm', onChange: changed }))) : null].filter(Boolean)
     );
 
   } else if (geom === 'polygon') {
@@ -164,14 +164,14 @@ function categorizeEditor(app, ls, flds) {
     app.styleChanged(ls);
     if (!arr.length) app.toast('La capa todavía no tiene datos cargados en la vista actual.');
   }, { kind: 'small' });
-  body.append(
+  body.append(...[
     inlineFields(field('Clasificar por', fieldSel), field('Modo', modeSel)),
     cz.mode === 'ranges' ? inlineFields(field('Clases', num(breaksObj, 'n', { min: 2, max: 9, step: 1 })), field('Método', select(breaksObj, 'how', [['jenks', 'Cortes naturales (Jenks)'], ['quantile', 'Cuantiles'], ['equal', 'Intervalos iguales'], ['stddev', 'Desvío estándar']]))) : null,
     cz.mode === 'ranges' ? field('Cortes a mano (opcional)', text(breaksObj, 'manual', { placeholder: '1825, 1850, 1870, 1885, 1900, 1925' })) : null,
     inlineFields(field('Paleta', palSel), el('div', { class: 'field' }, el('span', { class: 'label-spacer' }), cz.mode === 'ranges' ? button('Generar rangos', genRanges, { kind: 'small' }) : loadBtn)),
     warn,
     list,
-    check(cz, 'hideOthers', 'Ocultar elementos sin valor asignado', { onChange: () => app.styleChanged(ls) }),
+    check(cz, 'hideOthers', 'Ocultar elementos sin valor asignado', { onChange: () => app.styleChanged(ls) })].filter(Boolean)
   );
   if (cz.mode === 'ranges' && cz.field && cz.ranges && cz.ranges.length) {
     const nums = sampleFeatures(app, ls).map((f) => Number(f.get(cz.field))).filter(Number.isFinite).sort((a, b) => a - b);

@@ -36,7 +36,7 @@ export function openExportDialog(app) {
     const { W, H, ok } = exportSize(st, dpi);
     const mp = (W * H) / 1e6;
     clear(summary);
-    summary.append(
+    summary.append(...[
       el('div', { class: 'sum-line' }, el('strong', {}, `${st.page.widthMM} × ${st.page.heightMM} mm`), ` a ${dpi} ppp`),
       el('div', { class: 'sum-line' }, `${fmtInt(W)} × ${fmtInt(H)} píxeles (${mp.toFixed(1).replace('.', ',')} megapíxeles)`),
       !ok ? el('p', { class: 'warn-note' }, 'Supera el límite de lienzo del navegador: bajá la resolución o el tamaño de la página.') : null,
@@ -44,7 +44,7 @@ export function openExportDialog(app) {
       opts.format === 'svg' ? el('p', { class: 'note' }, 'Cada capa del mapa se incrusta como imagen en su propio grupo; textos, leyenda, norte, escala, conectores y sitios quedan como vectores editables.') : null,
       st.render.colorMode === 'grises' ? el('p', { class: 'note' }, 'Salida en escala de grises (Figura › Destino).') : null,
       legib.issues.length ? el('p', { class: 'warn-note' }, `Para «${media.name}» hay ${legib.issues.length} avisos de legibilidad (Figura › Destino de la figura).`) : null,
-      noCors.length ? el('p', { class: 'warn-note' }, `Quedan fuera de la exportación porque su servidor no lo permite (sin CORS): ${noCors.map((l) => `«${l.name}»`).join(', ')}.`) : null,
+      noCors.length ? el('p', { class: 'warn-note' }, `Quedan fuera de la exportación porque su servidor no lo permite (sin CORS): ${noCors.map((l) => `«${l.name}»`).join(', ')}.`) : null].filter(Boolean)
     );
     clear(qualityRow);
     if (opts.format === 'jpeg' || (opts.format === 'pdf' && !opts.lossless)) qualityRow.append(field('Calidad JPEG', range(opts, 'quality', { min: 0.6, max: 1, step: 0.01, format: (v) => `${Math.round(v * 100)}%` })));

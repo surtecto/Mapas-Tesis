@@ -213,7 +213,7 @@ export function openImageryDialog(app, { tab } = {}) {
         const top = [...m.entries()].filter(([k]) => { const [a, b] = k.split('>'); return a !== b; }).sort((a, b) => b[1] - a[1]).slice(0, 5);
         const nameOf = (v) => (LANDCOVER.classes.find((c) => String(c.v) === String(v)) || {}).name || v;
         clear(out);
-        out.append(el('h3', {}, `Cambios de cobertura ${y1}–${y2}`),
+        out.append(...[el('h3', {}, `Cambios de cobertura ${y1}–${y2}`),
           el('p', { class: 'note' }, `Cambió de clase el ${((changed / total) * 100).toLocaleString('es-AR', { maximumFractionDigits: 1 })} % de la vista (${fmtHa(changed)} ha de ${fmtHa(total)} ha). Filas: cobertura en ${y1}; columnas: en ${y2}; en hectáreas. Parte del cambio es error de clasificación: leelo como tendencia, no como medición.`),
           el('div', { class: 'matrix-wrap' }, el('table', { class: 'stat-table matrix' }, el('thead', {}, thead), tb)),
           top.length ? el('ol', { class: 'top-changes' }, ...top.map(([k, v]) => { const [a, b] = k.split('>'); return el('li', {}, `${nameOf(a)} → ${nameOf(b)}: ${fmtHa(v)} ha`); })) : null,
@@ -232,7 +232,7 @@ export function openImageryDialog(app, { tab } = {}) {
               }, { opacity: 1 });
               app.toast('Mapa de cambios agregado (solo los píxeles que cambiaron de clase).');
             } }, 'Agregar el mapa de cambios'),
-            el('button', { type: 'button', class: 'btn small ghost', onclick: () => downloadBlob(new Blob([csv(rows)], { type: 'text/csv' }), `cambios-cobertura-${y1}-${y2}.csv`) }, 'Descargar la matriz (CSV)')));
+            el('button', { type: 'button', class: 'btn small ghost', onclick: () => downloadBlob(new Blob([csv(rows)], { type: 'text/csv' }), `cambios-cobertura-${y1}-${y2}.csv`) }, 'Descargar la matriz (CSV)'))].filter(Boolean));
       } catch (e) { app.toast(`No se pudo calcular: ${e.message}`, 'error'); }
       changeBtn.disabled = false; changeBtn.textContent = 'Cambios entre los dos años';
     });

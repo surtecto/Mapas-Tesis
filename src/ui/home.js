@@ -485,11 +485,11 @@ export function renderWizard(app, preset = {}) {
         el('div', {}, el('dt', {}, 'Región'), el('dd', {}, pl.region ? pl.region.name : pl.macro || '—')),
         el('div', {}, el('dt', {}, 'Forma'), el('dd', {}, w.area.geom.type === 'Point' ? 'Punto' : `${fmtNum(km, km < 10 ? 1 : 0)} km de ancho`)),
         pl.faja ? el('div', {}, el('dt', {}, 'Marco'), el('dd', {}, `POSGAR 2007, faja ${pl.faja}`)) : null);
-      info.append(
+      info.append(...[
         fld('Nombre del área', nm, 'Aparece en el epígrafe y en el mapa de ubicación.'),
         facts,
         pl.region && pl.region.style ? el('p', { class: 'note' }, pl.region.style) : null,
-        el('button', { type: 'button', class: 'btn small ghost', onclick: () => { w.area = null; src.clear(); paintInfo(); } }, 'Quitar el área'));
+        el('button', { type: 'button', class: 'btn small ghost', onclick: () => { w.area = null; src.clear(); paintInfo(); } }, 'Quitar el área')].filter(Boolean));
     }
     paintInfo();
     return el('div', { class: 'wiz-step wide' },
