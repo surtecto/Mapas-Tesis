@@ -163,8 +163,11 @@ export function templateArgentina() {
   return s;
 }
 
-// autoría de los ejemplos de Giles: son figuras de una tesis en curso y la llevan en el epígrafe
-export const EXAMPLE_CREDIT = { author: 'Juan Patricio Addesso', institution: 'Doctorado en Geografía, USAL' };
+// autoría de los ejemplos de Giles: son figuras de una tesis en curso y la llevan en el epígrafe.
+// El epígrafe pone este texto detrás del nombre: «Doctorado en …» ahí se lee como título obtenido; la tesis está en curso.
+export const EXAMPLE_CREDIT = { author: 'Arq. Juan Patricio Addesso', institution: 'doctorando en Geografía, Universidad del Salvador (USAL)' };
+// cómo salió en la versión 3.4.0, para corregirlo en los proyectos que ya lo copiaron
+export const OLD_EXAMPLE_CREDIT = { author: 'Juan Patricio Addesso', institution: 'Doctorado en Geografía, USAL' };
 
 export const TEMPLATES = [
   { id: 'giles', name: 'Pago Gilense: localización en la Pampa ondulada', group: 'Tesis', build: templateGiles,

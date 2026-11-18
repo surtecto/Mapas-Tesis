@@ -63,6 +63,20 @@ export async function createProject(meta, firstMap) {
   return p;
 }
 
+// Corrige una autoría mal escrita en los proyectos guardados: solo los que tienen exactamente esos valores,
+// y solo esos campos; el resto del proyecto y sus mapas no cambian. Devuelve los proyectos corregidos.
+export async function fixCredit(from, to) {
+  const fixed = [];
+  for (const p of await dbAll('proyectos')) {
+    const m = p.meta || {};
+    if (Object.keys(from).every((k) => String(m[k] || '').trim() === from[k])) {
+      await saveProjectMeta(p.id, to);
+      fixed.push(p.id);
+    }
+  }
+  return fixed;
+}
+
 export async function saveProjectMeta(id, meta) {
   const p = await dbGet('proyectos', id);
   if (!p) return null;

@@ -13,9 +13,9 @@ import { MapCtx } from './mapctx.js';
 import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom } from './projections.js';
 import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, insetOutline, textPosition } from './overlay.js';
 import { History, normalizeState, loadLocal, serializeState, newText } from './state.js';
-import { TEMPLATES, createExampleProject } from './templates.js';
+import { TEMPLATES, createExampleProject, EXAMPLE_CREDIT, OLD_EXAMPLE_CREDIT } from './templates.js';
 import {
-  getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject, snapshotMap, restorePrev,
+  getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, fixCredit, touchProject, snapshotMap, restorePrev,
   exportProject, importProject, migrateLegacy, defaultMeta, onProjectChange, listProjects,
 } from './library.js';
 import {
@@ -80,6 +80,7 @@ class App {
     } catch (e) { /* noop */ }
     this.setupChannel();
     await this.setupFolder();
+    await this.fixExampleCredit();
     await this.seedFirstVisit();
     setTimeout(() => cachePrune(), 8000); // las teselas guardadas de más de 4 meses se descartan
     window.addEventListener('hashchange', () => this.route());
@@ -132,6 +133,18 @@ class App {
         if (m) await saveMap(m.id, m.state, { thumb });
       } catch (e) { /* sin miniatura: se genera al abrir el mapa */ }
     } catch (e) { /* sin ejemplo: la planoteca arranca vacía */ }
+  }
+
+  // La versión 3.4.0 firmaba los ejemplos de Giles «Juan Patricio Addesso, Doctorado en Geografía, USAL», que detrás
+  // de un nombre se lee como título obtenido. Se corrige una vez, solo en los proyectos que llevan ese texto tal cual.
+  async fixExampleCredit() {
+    const KEY = 'mapas-tesis:credito-ejemplo-2';
+    try { if (localStorage.getItem(KEY)) return; } catch (e) { return; }
+    try {
+      const fixed = await fixCredit(OLD_EXAMPLE_CREDIT, { author: EXAMPLE_CREDIT.author, institution: EXAMPLE_CREDIT.institution });
+      try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { /* sin almacenamiento local */ }
+      if (fixed.length) setTimeout(() => this.toast(`Autoría corregida en ${fixed.length === 1 ? 'un proyecto copiado' : `${fixed.length} proyectos copiados`} del ejemplo de Giles: ahora dice «doctorando en Geografía».`), 900);
+    } catch (e) { /* queda como estaba */ }
   }
 
   // ---------- carpeta de proyectos ----------
