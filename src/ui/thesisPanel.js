@@ -184,7 +184,7 @@ function doApplyTheme(app, theme) {
 
 function themesGallery(app) {
   const box = el('div', { class: 'themes' });
-  for (const t of THEMES) {
+  for (const t of THEMES.filter((x) => !x.hidden || x.id === (app.state.thesis && app.state.thesis.themeId))) {
     const cur = app.state.thesis.themeId === t.id;
     box.append(el('div', { class: `theme-card${cur ? ' current' : ''}` }, swatches(t),
       el('div', { class: 'tc-text' }, el('strong', {}, t.name), el('span', {}, t.desc)),
@@ -197,7 +197,7 @@ function modelsGallery(app) {
   const box = el('div', { class: 'templates' });
   let grp = '';
   for (const t of TEMPLATES) {
-    if (t.group !== grp) { grp = t.group; box.append(el('p', { class: 'menu-label' }, grp === 'Tesis' ? 'Tesis: Pago Gilense' : 'Antártida (Coni-Mapas)')); }
+    if (t.group !== grp) { grp = t.group; box.append(el('p', { class: 'menu-label' }, 'Tesis: Pago Gilense (San Andrés de Giles)')); }
     box.append(el('div', { class: 'tpl' }, el('div', { class: 'tpl-text' }, el('strong', {}, t.name), t.desc ? el('span', {}, t.desc) : null), button('Nuevo mapa', () => app.loadTemplate(t.id), { kind: 'small' })));
   }
   box.append(el('p', { class: 'hint' }, 'Cada modelo se agrega como un mapa nuevo de este proyecto; el mapa abierto queda como está.'));

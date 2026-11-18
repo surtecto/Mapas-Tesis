@@ -1,11 +1,11 @@
-// Proyecciones cartográficas disponibles (polares antárticas, bicontinental, POSGAR 2007, Campo Inchauspe, UTM, Mercator y geográficas)
+// Proyecciones cartográficas disponibles (POSGAR 2007, bicontinental, Campo Inchauspe, UTM, Mercator, geográficas y, para mapas viejos, polares)
 import proj4 from 'proj4';
 import { register } from 'ol/proj/proj4.js';
 import { get as getProjection, getPointResolution, fromLonLat, toLonLat, transform } from 'ol/proj.js';
 
 export const PROJECTIONS = [
   {
-    code: 'EPSG:3031', group: 'Antártida y bicontinental',
+    code: 'EPSG:3031', group: 'Polares', list: false,
     name: 'Estereográfica polar antártica',
     detail: 'WGS 84 / Antarctic Polar Stereographic (EPSG:3031). Conforme, paralelo estándar 71°S. Estándar SCAR para cartografía antártica.',
     def: '+proj=stere +lat_0=-90 +lat_ts=-71 +lon_0=0 +k=1 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs',
@@ -14,7 +14,7 @@ export const PROJECTIONS = [
     polar: true,
   },
   {
-    code: 'CONI:BICONT', group: 'Antártida y bicontinental',
+    code: 'CONI:BICONT', group: 'Argentina bicontinental',
     name: 'Bicontinental IGN (Lambert acimutal equivalente)',
     detail: 'Lambert acimutal equivalente con punto de tangencia 40°S 60°O, WGS 84. Proyección indicada por el IGN para el mapa bicontinental (sectores continental, insular y antártico).',
     def: '+proj=laea +lat_0=-40 +lon_0=-60 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs',
@@ -23,7 +23,7 @@ export const PROJECTIONS = [
     polar: true,
   },
   {
-    code: 'EPSG:6932', group: 'Antártida y bicontinental',
+    code: 'EPSG:6932', group: 'Polares', list: false,
     name: 'Lambert acimutal equivalente polar sur',
     detail: 'WGS 84 / NSIDC EASE-Grid 2.0 South (EPSG:6932). Equivalente (conserva áreas); útil para comparar superficies.',
     def: '+proj=laea +lat_0=-90 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs',

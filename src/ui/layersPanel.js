@@ -158,7 +158,8 @@ function layerBody(app, ls, def) {
         field('Escala de grises', range(ls.adjust, 'grayscale', { min: 0, max: 100, step: 1, onInput: () => app.commit('layers', { history: false }), onChange: () => app.commit('layers'), format: (v) => `${v}%` }))),
     ));
   }
-  body.append(field('Recorte geográfico', select(ls, 'clip', CLIPS, { onChange: () => app.commit('layers') })));
+  const clips = CLIPS.filter(([v]) => v === 'none' || v === ls.clip);
+  if (clips.length > 1) body.append(field('Recorte geográfico', select(ls, 'clip', clips, { onChange: () => app.commit('layers') })));
   if (app.state.insets.length) {
     const box = el('div', { class: 'inset-vis' });
     for (const z of app.state.insets) {
@@ -372,7 +373,8 @@ function catalogView(app) {
   const proj = projInfo(app.state.projection);
   for (const g of GROUPS) {
     if (g.hidden) continue;
-    const items = CATALOG.filter((d) => d.group === g.id);
+    const items = CATALOG.filter((d) => d.group === g.id && (!d.antarctic || present.has(d.id)));
+    if (!items.length) continue;
     const list = el('ul', { class: 'catalog-list' });
     for (const d of items) {
       const inMap = present.has(d.id);

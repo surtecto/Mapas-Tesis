@@ -128,7 +128,7 @@ function categorizeEditor(app, ls, flds) {
   // la paleta elegida queda guardada en la capa: la que se ve en la lista es la que se usa al generar
   if (!cz.palette || !PALETTES.some((p) => p.id === cz.palette)) cz.palette = cz.mode === 'ranges' ? 'periodos' : 'okabe';
   const palObj = { get p() { return cz.palette; }, set p(v) { cz.palette = v; } };
-  const palSel = select(cz, 'palette', PALETTES.map((p) => [p.id, p.name]));
+  const palSel = select(cz, 'palette', PALETTES.filter((p) => !p.hidden || p.id === cz.palette).map((p) => [p.id, p.name]));
   if (!cz.breaks) cz.breaks = { n: 5, how: 'jenks', manual: '' };
   const breaksObj = cz.breaks;
   const warn = el('p', { class: 'note warn-note' });

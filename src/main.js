@@ -13,10 +13,10 @@ import { MapCtx } from './mapctx.js';
 import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom } from './projections.js';
 import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, insetOutline, textPosition } from './overlay.js';
 import { History, normalizeState, loadLocal, serializeState, newText } from './state.js';
-import { TEMPLATES } from './templates.js';
+import { TEMPLATES, createExampleProject } from './templates.js';
 import {
   getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, touchProject, snapshotMap, restorePrev,
-  exportProject, importProject, migrateLegacy, defaultMeta, onProjectChange,
+  exportProject, importProject, migrateLegacy, defaultMeta, onProjectChange, listProjects,
 } from './library.js';
 import {
   initFolder, folderStatus, onFolderStatus, syncAll, syncProject, scheduleProjectWrite, flushWrites, trashProject, resolveRemote, reconnectFolder,
@@ -80,6 +80,7 @@ class App {
     } catch (e) { /* noop */ }
     this.setupChannel();
     await this.setupFolder();
+    await this.seedFirstVisit();
     setTimeout(() => cachePrune(), 8000); // las teselas guardadas de más de 4 meses se descartan
     window.addEventListener('hashchange', () => this.route());
     window.addEventListener('beforeunload', () => { if (this.current && this.state) this.saveCurrent({ sync: true }); });
@@ -109,6 +110,29 @@ class App {
   }
 
   setHash(h) { if (location.hash !== h) history.replaceState(null, '', h); }
+
+  // Primera visita: quien abre la web por primera vez encuentra un ejemplo de Giles en la planoteca.
+  // Solo si este navegador no tiene ningún proyecto ni carpeta vinculada: nunca toca ni reemplaza mapas existentes,
+  // y queda anotado para no volver a agregarlo aunque después se borren todos los proyectos.
+  async seedFirstVisit() {
+    const KEY = 'mapas-tesis:ejemplo-inicial';
+    try { if (localStorage.getItem(KEY)) return; } catch (e) { return; }
+    try {
+      const had = (await listProjects()).length > 0 || folderStatus().linked;
+      try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { /* sin almacenamiento local */ }
+      if (had) return;
+      const t = TEMPLATES.find((x) => x.id === 'giles');
+      if (!t) return;
+      const p = await createExampleProject(t);
+      // miniatura ya dibujada, para que la planoteca no muestre una hoja vacía antes de abrir el mapa
+      try {
+        const blob = await (await fetch('data/ejemplos/pago-gilense-miniatura.jpg')).blob();
+        const thumb = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
+        const m = await getMap(p.activeMapId);
+        if (m) await saveMap(m.id, m.state, { thumb });
+      } catch (e) { /* sin miniatura: se genera al abrir el mapa */ }
+    } catch (e) { /* sin ejemplo: la planoteca arranca vacía */ }
+  }
 
   // ---------- carpeta de proyectos ----------
   openProjectId() { return this.current && !document.body.classList.contains('on-home') ? this.current.projectId : null; }
@@ -750,7 +774,7 @@ class App {
     this.buildInsets();
     this.layout();
     this.$.title.value = this.state.title;
-    this.$.projection.value = this.state.projection;
+    this.showProjection(this.state.projection);
     this.renderLeft();
     this.renderInspector();
     if (this.selTool) this.selTool.refresh();
@@ -799,7 +823,7 @@ class App {
     if (code === 'EPSG:3031' || code === 'EPSG:6932') this.state.view.rotation = rotationForMeridian(code, this.state.view.center[0], this.state.view.center[1]);
     else this.state.view.rotation = 0;
     this.mainCtx.projection = '';
-    this.$.projection.value = code;
+    this.showProjection(code);
     this.commit('projection');
     this.toast(projInfo(code).detail);
   }
@@ -1084,16 +1108,27 @@ class App {
     st.querySelector('[data-k="size"]').textContent = `${fmtNum(this.state.page.widthMM, 1)} × ${fmtNum(this.state.page.heightMM, 1)} mm`;
   }
 
+  // una proyección que no está en el menú (polar, histórica) se agrega solo para el mapa que la usa
+  showProjection(code) {
+    const sel = this.$.projection;
+    if (!sel) return;
+    if (![...sel.options].some((o) => o.value === code)) {
+      const p = PROJECTIONS.find((x) => x.code === code);
+      if (p) sel.append(el('option', { value: p.code, 'data-extra': '1' }, p.name));
+    }
+    sel.value = code;
+  }
+
   // ---------- controles generales ----------
   setupChrome() {
     const projSel = this.$.projection;
-    const order = ['Argentina (POSGAR 2007)', 'Antártida y bicontinental', 'UTM', 'Históricas', 'Mundiales'];
+    const order = ['Argentina (POSGAR 2007)', 'Argentina bicontinental', 'UTM', 'Históricas', 'Mundiales'];
     for (const g of order) {
       const og = el('optgroup', { label: g });
       for (const p of PROJECTIONS.filter((x) => x.group === g && x.list !== false)) og.append(el('option', { value: p.code }, p.name));
       projSel.append(og);
     }
-    projSel.value = this.state.projection;
+    this.showProjection(this.state.projection);
     projSel.addEventListener('change', () => { this.setProjection(projSel.value); this.renderLeft(); });
     setupSearch(this);
     this.$.title.value = this.state.title;

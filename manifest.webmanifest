@@ -1,0 +1,17 @@
+{
+  "name": "Mapas-Tesis",
+  "short_name": "Mapas-Tesis",
+  "description": "Mapas para tesis e investigación: capas oficiales, imágenes satelitales, selección por variable, planos históricos y salida para imprimir, proyectar o publicar.",
+  "lang": "es",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#efeae0",
+  "theme_color": "#14263a",
+  "icons": [
+    { "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

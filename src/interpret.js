@@ -78,11 +78,6 @@ export const TRAITS = [
     layers: ['ign-banados', 'ign-espejos'],
     symb: 'Sitios de muestreo con paleta Okabe–Ito (la misma de los gráficos del trabajo), base clara y escala bien visible.',
     questions: ['¿Los colores de los sitios son los mismos que los de los gráficos estadísticos? (podés extraerlos de una imagen del gráfico en Sitios y colores).'] },
-  { id: 'polar', label: 'Antártida y ambientes polares', theme: 'polar',
-    re: [/antart/, /glaciar/, /\bhielos?\b/, /pinguin/, /\bpolar/, /oceano austral/, /shetland/],
-    layers: ['add-costa', 'rema-relieve', 'ign-bases', 'ref-sector'],
-    symb: 'Hielo blanco azulado, mar gris celeste, proyección estereográfica polar o bicontinental.',
-    questions: ['¿La proyección polar está orientada con el meridiano del área de estudio hacia arriba?'] },
   { id: 'patrimonio', label: 'Patrimonio y memoria', theme: 'patrimonio',
     re: [/patrimon/, /arquitect/, /edificio/, /escuelas? rural/, /capilla/, /iglesia/, /monumento/, /bienes? cultural/, /memoria/, /sitios? historic/, /casco/, /pulperia/, /posta/],
     layers: ['ign-escuelas', 'ign-religiosos', 'ign-cementerios', 'ign-taperas', 'atlas-estancias1884'],
@@ -233,16 +228,15 @@ export async function sampleRelief(bboxLL, { maxTiles = 9 } = {}) {
 // ---------- síntesis ----------
 export function synthesize({ traits, place, relief, scaleRF }) {
   const primary = traits[0] || null;
-  const themeId = primary ? primary.theme : place && place.region && place.region.parent === 'Llanura pampeana' ? 'paisaje-pampeano' : place && place.macro === 'Antártida' ? 'polar' : 'relieve';
+  const themeId = primary ? primary.theme : place && place.region && place.region.parent === 'Llanura pampeana' ? 'paisaje-pampeano' : 'relieve';
   const layers = new Set();
   traits.slice(0, 3).forEach((t) => t.layers.forEach((l) => layers.add(l)));
   if (place && place.region && place.region.parent === 'Llanura pampeana') ['ign-rios', 'ign-rios-int', 'ign-localidades', 'ign-departamentos'].forEach((l) => layers.add(l));
-  if (place && place.macro === 'Antártida') ['add-costa', 'ign-bases'].forEach((l) => layers.add(l));
   const scaleKind = !scaleRF ? '' : scaleRF < 60000 ? 'local' : scaleRF < 400000 ? 'partido o comarca' : scaleRF < 4000000 ? 'regional' : 'nacional o continental';
   let projection = null;
   if (place && place.macro === 'Antártida') projection = { code: 'EPSG:3031', why: 'Estereográfica polar: estándar SCAR para la Antártida.' };
   else if (place && place.posgar && scaleRF && scaleRF < 4000000) projection = { code: place.posgar, why: `POSGAR 2007 faja ${place.faja}: marco oficial argentino; conforme y con poca deformación a escala ${scaleKind}.` };
-  else if (scaleRF && scaleRF >= 4000000) projection = { code: 'CONI:BICONT', why: 'A escala nacional, la Lambert acimutal equivalente bicontinental del IGN conserva superficies y muestra el sector antártico.' };
+  else if (scaleRF && scaleRF >= 4000000) projection = { code: 'CONI:BICONT', why: 'A escala nacional, la Lambert acimutal equivalente bicontinental del IGN conserva superficies y muestra el territorio bicontinental.' };
   const questions = [];
   traits.slice(0, 3).forEach((t) => t.questions.forEach((q) => questions.push({ q, from: t.label })));
   if (relief && relief.amp < 150) questions.push({ q: `El relieve visible varía apenas ${Math.round(relief.amp)} m: para que se lea hay que exagerarlo (×${relief.zFactor}). ¿Lo declarás en el epígrafe para no dramatizar la llanura?`, from: 'Relieve' });

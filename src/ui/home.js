@@ -18,7 +18,7 @@ import { storageInfo, requestPersistence } from '../db.js';
 import { MEDIA, getMedia } from '../media.js';
 import { THEMES } from '../themes.js';
 import { readTheme, synthesize, readPlace } from '../interpret.js';
-import { TEMPLATES } from '../templates.js';
+import { TEMPLATES, createExampleProject } from '../templates.js';
 import { buildFirstMap } from '../starter.js';
 import { searchPlaces } from './search.js';
 import { gkFaja } from '../projections.js';
@@ -46,8 +46,8 @@ const kindName = (k) => (WORK_KINDS.find((x) => x[0] === k) || [k, ''])[1];
 const mb = (b) => (b == null ? '—' : `${fmtNum(b / 1048576, 1)} MB`);
 const slug = (t) => String(t || 'proyecto').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w]+/g, '-').toLowerCase().slice(0, 50);
 
-export function brandMark(size = 28) {
-  return el('span', { class: 'brand-mark', html: `<svg viewBox="0 0 32 32" width="${size}" height="${size}" aria-hidden="true"><path d="M4 23c5-1 8-4 12-4s7 3 12 2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 17c4-.6 7-2.6 11-2.6S22 17 28 16" fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="2.2 1.6" opacity=".8"/><path d="M5 27h22" stroke="currentColor" stroke-width="1.2" opacity=".55"/><rect x="9" y="5" width="11" height="8" fill="none" stroke="#e8501c" stroke-width="1.6" transform="rotate(-8 14.5 9)"/><circle cx="23.5" cy="8" r="1.6" fill="#e8501c"/></svg>` });
+export function brandMark(size = 30) {
+  return el('img', { class: 'brand-mark brand-icon', src: 'assets/icon.svg', width: size, height: size, alt: '' });
 }
 
 function topBar(tag, tools = []) {
@@ -105,10 +105,7 @@ export async function renderHome(app, { sync = true } = {}) {
       if (t.build.after) { try { await t.build.after(app); } catch (e) { /* el modelo sigue sin su imagen */ } }
       const state = t.build();
       const th = state.thesis || {};
-      const p = await createProject(defaultMeta({
-        name: t.name, kind: t.group === 'Tesis' ? 'tesis-doctoral' : 'articulo', title: th.title || '', keywords: th.keywords || '', period: th.period || '',
-        mediaId: state.media.profileId, themeId: th.themeId || '',
-      }), { name: state.title || t.name, state });
+      const p = await createExampleProject(t, state);
       location.hash = `#/p/${p.id}`;
     },
   }, el('strong', {}, t.name), t.desc ? el('span', {}, t.desc) : null);
@@ -118,9 +115,7 @@ export async function renderHome(app, { sync = true } = {}) {
     blank,
     el('h2', {}, 'O partir de un ejemplo'),
     el('p', { class: 'home-note' }, 'Se copia como proyecto propio: podés cambiarlo todo sin tocar el original.'),
-    el('div', { class: 'examples' }, ...TEMPLATES.filter((t) => t.group === 'Tesis' && t.id !== 'argentina').map(exampleBtn)),
-    el('details', { class: 'more-examples' }, el('summary', {}, 'Ejemplos antárticos de Coni-Mapas'),
-      el('div', { class: 'examples' }, ...TEMPLATES.filter((t) => t.group === 'Antártida' && t.id !== 'blanco').map(exampleBtn))));
+    el('div', { class: 'examples' }, ...TEMPLATES.filter((t) => t.group === 'Tesis' && t.id !== 'argentina').map(exampleBtn)));
 
   const list = el('div', { class: 'project-grid' });
   if (!projects.length) {
@@ -539,7 +534,7 @@ export function renderWizard(app, preset = {}) {
     mediaSel.addEventListener('change', () => { w.mediaId = mediaSel.value; paintMedia(); });
     paintMedia();
     const themeSel = el('select', {});
-    THEMES.forEach((t) => themeSel.append(el('option', { value: t.id, selected: t.id === w.themeId }, `${t.name}${t.id === syn.themeId ? ' (sugerido por el tema)' : ''}`)));
+    THEMES.filter((t) => !t.hidden).forEach((t) => themeSel.append(el('option', { value: t.id, selected: t.id === w.themeId }, `${t.name}${t.id === syn.themeId ? ' (sugerido por el tema)' : ''}`)));
     themeSel.addEventListener('change', () => { w.themeId = themeSel.value; });
     const ctx = el('input', { type: 'checkbox', checked: w.context });
     ctx.addEventListener('change', () => { w.context = ctx.checked; });

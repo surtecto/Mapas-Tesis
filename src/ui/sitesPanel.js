@@ -165,7 +165,7 @@ function categoriesView(app) {
         app.commit('sites'); app.renderLeft();
       } }, '×')));
   });
-  const palSel = select(st, 'paletteId', PALETTES.map((p) => [p.id, p.name]), {
+  const palSel = select(st, 'paletteId', PALETTES.filter((p) => !p.hidden || p.id === st.paletteId).map((p) => [p.id, p.name]), {
     onChange: () => {
       const p = getPalette(st.paletteId);
       const cols = paletteColors(p, st.categories.length);

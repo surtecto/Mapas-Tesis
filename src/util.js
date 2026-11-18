@@ -1,4 +1,4 @@
-// Utilidades generales de Coni-Mapas
+// Utilidades generales de Mapas-Tesis
 export const PT_MM = 25.4 / 72; // 1 punto tipográfico en mm
 export const CSS_PX_PER_MM = 96 / 25.4;
 

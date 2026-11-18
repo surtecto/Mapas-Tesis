@@ -2,7 +2,6 @@
 import { hexToRgb, rgbToHex, rgbToLab, deltaE, simulateCVD, clamp } from './util.js';
 
 export const PALETTES = [
-  { id: 'pinguinos', name: 'Pingüinos (de tu gráfico: Adelia, Emperador, Papúa)', colors: ['#3176b1', '#e29f2c', '#36a177'], labels: ['Adelia', 'Emperador', 'Papúa'] },
   { id: 'sepia', name: 'Tinta y sepia (cartografía histórica)', colors: ['#8c2f1b', '#2f5d8c', '#6b4a2b', '#5a3d7a', '#4f7a5a', '#b07a2a', '#3b3b3b'] },
   { id: 'pampa', name: 'Pampa (tierras, pastos y aguas)', colors: ['#4f7a5a', '#c9a66b', '#3b78a8', '#b5523b', '#8a7a66', '#d9c58a', '#6b4a2b'] },
   { id: 'periodos', name: 'Períodos históricos (secuencial marrón–verde azulado)', colors: ['#8c510a', '#bf812d', '#dfc27d', '#80cdc1', '#35978f', '#01665e'] },
@@ -21,6 +20,7 @@ export const PALETTES = [
   { id: 'set2', name: 'ColorBrewer Set2', colors: ['#66c2a5', '#fc8d62', '#8da0cb', '#e78ac3', '#a6d854', '#ffd92f', '#e5c494', '#b3b3b3'] },
   { id: 'dark2', name: 'ColorBrewer Dark2', colors: ['#1b9e77', '#d95f02', '#7570b3', '#e7298a', '#66a61e', '#e6ab02', '#a6761d', '#666666'] },
   { id: 'set1', name: 'ColorBrewer Set1', colors: ['#e41a1c', '#377eb8', '#4daf4a', '#984ea3', '#ff7f00', '#ffff33', '#a65628', '#f781bf'] },
+  { id: 'pinguinos', hidden: true, name: 'Pingüinos (de tu gráfico: Adelia, Emperador, Papúa)', colors: ['#3176b1', '#e29f2c', '#36a177'], labels: ['Adelia', 'Emperador', 'Papúa'] },
 ];
 
 // HCL (CIE LCh(uv)) → sRGB, como grDevices::hcl de R
