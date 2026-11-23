@@ -142,7 +142,8 @@ export const OSM_THEMES = [
   { id: 'bosques', name: 'Bosques y forestaciones', geom: 'polygon', maxDeg2: 1.5, q: 'way["natural"="wood"];relation["natural"="wood"];way["landuse"="forest"];relation["landuse"="forest"]', style: { polygon: { fill: '#8fb58a', fillOpacity: 0.5, stroke: '#5a7d3a', strokeWidth: 0.15 } }, keep: ['name', 'natural', 'landuse', 'leaf_type'] },
   { id: 'patrimonio', name: 'Sitios históricos y arqueológicos', geom: 'point', maxDeg2: 30, q: 'node["historic"];way["historic"]', style: { point: { shape: 'triangle', size: 4, fill: '#6a4c93', stroke: '#ffffff', strokeWidth: 0.4 } }, keep: ['name', 'historic', 'heritage', 'start_date'] },
 ];
-const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+// el servidor principal a veces contesta «ocupado»: se insiste una vez antes de pasar al espejo
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 
 const sameP = (a, b) => a[0] === b[0] && a[1] === b[1];
 // une tramos (vías de una relación) en anillos cerrados
@@ -210,12 +211,16 @@ export async function fetchOsm(themeId, bboxLL) {
   let lastErr = null;
   for (const url of OVERPASS) {
     try {
-      const t = await getText(url, { ms: 110000, init: { method: 'POST', body: `data=${encodeURIComponent(body)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } } });
+      const t = await getText(url, { ms: url.includes('kumi') ? 45000 : 110000, init: { method: 'POST', body: `data=${encodeURIComponent(body)}`, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } } });
       if (t.trim().startsWith('<')) throw new Error('el servidor de OpenStreetMap está ocupado: probá en un minuto');
       const j = JSON.parse(t);
       if (j.remark && /timed out|out of memory/i.test(j.remark)) throw new Error('el pedido es demasiado grande: acercá la vista');
       return { theme, geojson: osmToGeoJSON(j, theme) };
-    } catch (err) { lastErr = err; }
+    } catch (err) {
+      lastErr = err;
+      if (/demasiado grande/.test(err.message)) break;
+      await new Promise((r) => setTimeout(r, 4000));
+    }
   }
   throw lastErr || new Error('no se pudo consultar OpenStreetMap');
 }

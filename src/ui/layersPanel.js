@@ -439,7 +439,7 @@ function latamView(app) {
     insert(boundariesLayer(ui.iso, ui.adm, r.geojson));
     app.toast(`Límites agregados: ${r.kept.toLocaleString('es-AR')} unidades${r.kept < r.total ? ` de ${r.total.toLocaleString('es-AR')}` : ''}. Quedan guardados dentro del mapa.`);
   }), { kind: 'small' });
-  const osmBtn = button('Traer lo que hay en la vista', () => busy(osmBtn, 'Consultando…', async () => {
+  const osmBtn = button('Traer lo que hay en la vista', () => busy(osmBtn, 'Consultando… (puede tardar un minuto)', async () => {
     const r = await fetchOsm(ui.theme, app.viewBBoxLL());
     if (!r.geojson.features.length) { app.toast(`OpenStreetMap no tiene «${r.theme.name.toLowerCase()}» cargado en esta vista.`, 'warn'); return; }
     insert(osmLayer(r.theme, r.geojson, ''));
