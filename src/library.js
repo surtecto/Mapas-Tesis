@@ -145,12 +145,21 @@ export async function listMaps(projectId) {
   const order = (p && p.mapIds) || [];
   return maps.sort((a, b) => (order.indexOf(a.id) + 1 || 1e6) - (order.indexOf(b.id) + 1 || 1e6));
 }
+const roundNums = (k, v) => (typeof v === 'number' && !Number.isInteger(v) ? Math.round(v * 1e7) / 1e7 : v);
+function sameState(a, b) {
+  const x = JSON.stringify(a), y = JSON.stringify(b);
+  if (x === y) return true;
+  try { return JSON.stringify(a, roundNums) === JSON.stringify(b, roundNums); } catch (e) { return false; }
+}
 export async function saveMap(id, state, { thumb, name } = {}) {
   const m = await dbGet('mapas', id);
   if (!m) return null;
   const next = clean(state);
-  const changed = JSON.stringify(next) !== JSON.stringify(m.state) || (!!name && name !== m.name);
-  m.state = next;
+  // abrir un mapa no es cambiarlo: las diferencias de redondeo al pasar por la vista (menos de un centímetro) no cuentan,
+  // y en ese caso lo guardado queda exactamente como estaba
+  const same = sameState(next, m.state);
+  const changed = !same || (!!name && name !== m.name);
+  if (!same) m.state = next;
   if (changed) m.updated = now();
   if (thumb) m.thumb = thumb;
   if (name) m.name = name;

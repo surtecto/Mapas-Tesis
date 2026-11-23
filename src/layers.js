@@ -39,7 +39,7 @@ function addUnique(src, feats) {
 }
 import { makeVectorStyleFn, drawSymbol, drawDecoratedLine, getPattern, dashArray, dashCap, fontString } from './styles.js';
 import { hexToRgb, rgba, PT_MM } from './util.js';
-import { lonLatTo, toLonLatFrom, metersPerUnit } from './projections.js';
+import { lonLatTo, toLonLatFrom, metersPerUnit, ensureProjection } from './projections.js';
 import { fitModel, modelHash } from './georef.js';
 import { peekImage, processedReady, processedUrl, getImage } from './imagestore.js';
 import { CERTAINTY } from './state.js';
@@ -654,7 +654,10 @@ function buildStaticImageLayer(ls, def, mctx, className) {
   const layer = new ImageLayer({ className });
   const classes = def.labels && def.classes ? JSON.stringify(def.classes.map((c) => [c.id != null ? c.id : c.v, c.color, c.show !== false])) : '';
   const key = `${def.key}|${classes}`;
-  const apply = (url) => layer.setSource(new ImageStatic({ url, imageExtent: def.extent, projection: 'EPSG:3857', interpolate: false }));
+  // los ráster importados conservan su sistema de coordenadas; las imágenes calculadas acá están en Mercator web
+  let proj = 'EPSG:3857';
+  if (def.projection) { const c = ensureProjection(def.projection); if (c === def.projection) proj = c; }
+  const apply = (url) => layer.setSource(new ImageStatic({ url, imageExtent: def.extent, projection: proj, interpolate: !!def.imported && !def.labels }));
   if (!paintedCache.has(key)) {
     const pr = getImage(def.key).then((v) => {
       if (!v) throw new Error('falta la imagen calculada en este navegador: abrí el proyecto exportado que la incluye o volvé a calcularla');

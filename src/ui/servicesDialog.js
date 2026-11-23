@@ -3,9 +3,10 @@
 import { el, clear, fmtInt } from '../util.js';
 import {
   FEATURED, loadIdera, wfsCapabilities, wmsCapabilities, arcgisCapabilities, wfsLayerDef, wmsLayerDef, arcgisLayerDef,
-  probeWfs, defaultStyleFor, bboxIntersects,
+  probeWfs, defaultStyleFor, bboxIntersects, baseUrl,
 } from '../services.js';
 import { newServiceLayerState } from '../state.js';
+import { LATAM } from '../latam.js';
 import { insertIndexFor } from './layersPanel.js';
 
 const LABEL_FIELDS = ['nombre', 'NOMBRE', 'nam', 'fna', 'name', 'Name', 'NAME', 'nom', 'PARTIDO', 'partido', 'localidad', 'departamen', 'titulo', 'denominaci'];
@@ -27,22 +28,29 @@ export function openServicesDialog(app, { providerId = null } = {}) {
   const right = el('section', { class: 'svc-main', 'aria-live': 'polite' });
   let idera = null;
 
-  const providers = () => (ui.scope === 'featured' ? FEATURED : (idera || []));
-  const findProv = (id) => FEATURED.find((p) => p.id === id) || (idera || []).find((p) => p.id === id);
+  if (!ui.custom) ui.custom = [];
+  const providers = () => (ui.scope === 'featured' ? FEATURED : ui.scope === 'latam' ? [...ui.custom, ...LATAM] : (idera || []));
+  const findProv = (id) => FEATURED.find((p) => p.id === id) || ui.custom.find((p) => p.id === id) || LATAM.find((p) => p.id === id) || (idera || []).find((p) => p.id === id);
+  const fillCountries = () => {
+    const jurs = [...new Set(LATAM.map((p) => p.jur))].sort((a, b) => a.localeCompare(b, 'es'));
+    clear(jurSel); jurSel.append(el('option', { value: '' }, 'Todos los países'), ...jurs.map((l) => el('option', { value: l, selected: ui.jur === l }, l)));
+  };
 
   // ----- lista de organismos -----
   const provSearch = el('input', { type: 'search', placeholder: 'Buscar organismo o tema', value: ui.pq, 'aria-label': 'Buscar organismo' });
   provSearch.addEventListener('input', () => { ui.pq = provSearch.value; paintProviders(); });
   const levelSel = el('select', { 'aria-label': 'Nivel', hidden: ui.scope !== 'idera' });
-  const jurSel = el('select', { 'aria-label': 'Jurisdicción', hidden: ui.scope !== 'idera' });
+  const jurSel = el('select', { 'aria-label': 'Jurisdicción o país', hidden: ui.scope === 'featured' });
   levelSel.addEventListener('change', () => { ui.level = levelSel.value; paintProviders(); });
   jurSel.addEventListener('change', () => { ui.jur = jurSel.value; paintProviders(); });
   const scopeBtns = el('div', { class: 'seg', role: 'tablist' },
-    ...[['featured', 'Destacados'], ['idera', 'Catálogo IDERA']].map(([v, t]) => el('button', { type: 'button', role: 'tab', 'aria-selected': String(ui.scope === v), class: ui.scope === v ? 'on' : '', onclick: async () => {
+    ...[['featured', 'Argentina'], ['latam', 'América Latina'], ['idera', 'Catálogo IDERA']].map(([v, t]) => el('button', { type: 'button', role: 'tab', 'aria-selected': String(ui.scope === v), class: ui.scope === v ? 'on' : '', onclick: async () => {
       ui.scope = v;
       scopeBtns.querySelectorAll('button').forEach((b) => { const on = b.textContent === t; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
-      levelSel.hidden = jurSel.hidden = v !== 'idera';
-      if (v === 'idera' && !idera) await loadIderaList();
+      levelSel.hidden = v !== 'idera'; jurSel.hidden = v === 'featured';
+      ui.jur = ''; ui.level = '';
+      if (v === 'latam') fillCountries();
+      if (v === 'idera') await loadIderaList();
       paintProviders();
     } }, t)));
 
@@ -65,19 +73,45 @@ export function openServicesDialog(app, { providerId = null } = {}) {
     clear(provList);
     const q = norm(ui.pq);
     const list = providers().filter((p) => (!q || norm(`${p.name} ${p.short} ${p.topics || ''} ${p.jur || ''}`).includes(q))
-      && (ui.scope !== 'idera' || ((!ui.level || p.level === ui.level) && (!ui.jur || p.jur === ui.jur))));
+      && (ui.scope === 'featured' || p.custom || ((!ui.level || p.level === ui.level) && (!ui.jur || p.jur === ui.jur))));
     if (!list.length) { provList.append(el('li', { class: 'svc-wait' }, 'Ningún organismo coincide.')); return; }
     let lastLevel = '';
     for (const p of list) {
       if (ui.scope === 'featured' && p.level !== lastLevel) { lastLevel = p.level; provList.append(el('li', { class: 'svc-prov-group' }, p.level === 'Nacional' ? 'Nacionales' : p.jur ? `Provinciales` : p.level)); }
-      const s = status.get(p.id) || (p.noCors ? 'nocors' : '');
+      if (ui.scope === 'latam' && (p.custom ? 'Servicios que pegaste' : p.jur) !== lastLevel) { lastLevel = p.custom ? 'Servicios que pegaste' : p.jur; provList.append(el('li', { class: 'svc-prov-group' }, lastLevel)); }
+      const s = status.get(p.id) || (p.noCors ? 'nocors' : p.checked ? 'ok' : '');
       const kinds = [p.wfs ? 'WFS' : '', p.wms ? 'WMS' : '', p.arcgis ? 'ArcGIS' : ''].filter(Boolean).join(' ');
       provList.append(el('li', {}, el('button', { type: 'button', role: 'option', 'aria-selected': String(ui.provider === p.id), class: `svc-prov${ui.provider === p.id ? ' on' : ''}`, onclick: () => { ui.provider = p.id; ui.kind = p.wfs ? 'wfs' : p.arcgis ? 'arcgis' : 'wms'; ui.arcPath = []; paintProviders(); paintMain(); } },
-        el('span', { class: `svc-dot ${s}`, title: s === 'ok' ? 'Se puede leer y exportar' : s === 'nocors' ? 'Solo para ver: el servidor no habilita CORS' : s === 'error' ? 'No respondió' : 'Sin consultar todavía' }),
+        el('span', { class: `svc-dot ${s}`, title: s === 'ok' ? 'Se puede leer y exportar' : s === 'nocors' ? 'Solo para ver: el servidor no habilita CORS' : s === 'error' ? 'No respondió' : p.unverified ? 'No respondió en la última comprobación: se prueba al abrirlo' : p.checked ? (p.note ? `Comprobado el ${p.checked}: solo para ver` : `Comprobado el ${p.checked}: se puede leer`) : 'Sin consultar todavía' }),
         el('span', { class: 'svc-prov-text' }, el('strong', {}, p.short || p.name), el('small', {}, p.short && p.short !== p.name ? p.name : (p.jur || p.level || ''))),
         el('span', { class: 'svc-kinds' }, kinds))));
     }
   }
+
+  // ----- cualquier servicio del que se tenga la dirección -----
+  const urlIn = el('input', { type: 'url', placeholder: 'https://…/geoserver/ows  o  …/rest/services', 'aria-label': 'Dirección de un servicio WFS, WMS o ArcGIS' });
+  const openUrl = () => {
+    const raw = urlIn.value.trim();
+    if (!/^https?:\/\/[^\s/]+\.[^\s/]+/i.test(raw)) { app.toast('Pegá la dirección completa del servicio, empezando por https://', 'warn'); return; }
+    let host = '';
+    try { host = new URL(raw).hostname.replace(/^www\./, ''); } catch (e) { app.toast('Esa dirección no se puede leer.', 'warn'); return; }
+    const clean = baseUrl(raw);
+    const arc = /\/rest\/services|\/(MapServer|FeatureServer)(\/\d+)?$/i.test(clean);
+    const p = { id: `url-${clean.replace(/[^a-z0-9]+/gi, '-').slice(-60)}`, short: host, name: `Servicio de ${host}`, level: 'Nacional', jur: '', custom: true, source: 'url', topics: clean,
+      ...(arc ? { arcgis: clean.replace(/\/(MapServer|FeatureServer)\/\d+$/i, '/$1') } : { wfs: clean, wms: clean }),
+      note: /^http:\/\//i.test(raw) ? 'La dirección empieza con http://: desde una web segura el navegador solo puede pedirla por https://. Si el servidor no atiende por https, no se va a poder leer.' : '' };
+    if (!ui.custom.some((x) => x.id === p.id)) ui.custom.unshift(p);
+    ui.scope = 'latam'; ui.provider = p.id; ui.kind = arc ? 'arcgis' : 'wfs'; ui.arcPath = []; ui.all = false; ui.jur = '';
+    scopeBtns.querySelectorAll('button').forEach((b) => { const on = b.textContent === 'América Latina'; b.classList.toggle('on', on); b.setAttribute('aria-selected', String(on)); });
+    levelSel.hidden = true; jurSel.hidden = false; fillCountries();
+    urlIn.value = '';
+    paintProviders(); paintMain();
+  };
+  urlIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); openUrl(); } });
+  const urlBox = el('div', { class: 'svc-url' },
+    el('label', { class: 'menu-label' }, 'Otro servicio: pegá su dirección'),
+    el('div', { class: 'btn-row' }, urlIn, el('button', { type: 'button', class: 'btn small', onclick: openUrl }, 'Abrir')),
+    el('p', { class: 'note' }, 'Sirve para cualquier IDE o geoportal del mundo: WFS y WMS (GeoServer, MapServer, QGIS Server) o ArcGIS REST. Al abrirlo se comprueba si se puede leer.'));
 
   // ----- panel derecho: capas del organismo -----
   const layerSearch = el('input', { type: 'search', placeholder: 'Buscar capa por nombre o descripción', value: ui.q, 'aria-label': 'Buscar capa' });
@@ -100,7 +134,8 @@ export function openServicesDialog(app, { providerId = null } = {}) {
     const p = findProv(ui.provider);
     clear(head); clear(tabs); clear(rows);
     if (!p) return;
-    head.append(...[el('h3', {}, p.name), p.topics ? el('p', { class: 'svc-topics' }, p.topics) : null, p.note ? el('p', { class: 'warn-note' }, p.note) : null].filter(Boolean));
+    head.append(...[el('h3', {}, p.name), p.topics ? el('p', { class: 'svc-topics' }, p.topics) : null, p.note ? el('p', { class: 'warn-note' }, p.note) : null,
+      p.unverified ? el('p', { class: 'note' }, 'Este servicio no respondió en la comprobación del 23/11/2026. Se vuelve a probar ahora: si responde, vas a ver sus capas.') : p.checked && !p.note ? el('p', { class: 'note' }, `Comprobado el ${p.checked}: responde y se puede leer desde la aplicación.`) : null].filter(Boolean));
     const kinds = [['wfs', 'Vectorial (WFS)', 'Se restiliza, se filtra y se exporta como vector'], ['arcgis', 'ArcGIS', 'Capas vectoriales de un servidor ArcGIS'], ['wms', 'Imagen (WMS)', 'Se ve con el estilo del servidor']].filter(([k]) => p[k]);
     if (!kinds.some(([k]) => k === ui.kind)) ui.kind = kinds[0] ? kinds[0][0] : 'wms';
     for (const [k, t, hint] of kinds) {
@@ -261,12 +296,13 @@ export function openServicesDialog(app, { providerId = null } = {}) {
 
   d.append(
     el('header', { class: 'svc-top' },
-      el('div', {}, el('h2', {}, 'Servicios oficiales'), el('p', {}, 'Capas de los organismos del Estado. Las vectoriales se pueden restilizar, filtrar y exportar; las imágenes WMS se ven con el estilo de su servidor.')),
+      el('div', {}, el('h2', {}, 'Servicios oficiales'), el('p', {}, 'Capas de organismos públicos de la Argentina y de América Latina, o de cualquier servicio del que tengas la dirección. Las vectoriales se pueden restilizar, filtrar y exportar; las imágenes WMS se ven con el estilo de su servidor.')),
       el('button', { type: 'button', class: 'btn', onclick: () => d.close() }, 'Cerrar')),
     el('div', { class: 'svc-body' },
-      el('aside', { class: 'svc-side' }, scopeBtns, provSearch, el('div', { class: 'svc-sel' }, levelSel, jurSel), provList),
+      el('aside', { class: 'svc-side' }, scopeBtns, provSearch, el('div', { class: 'svc-sel' }, levelSel, jurSel), provList, urlBox),
       right));
   d.showModal();
+  if (ui.scope === 'latam') fillCountries();
   if (ui.scope === 'idera') loadIderaList().then(paintProviders); else paintProviders();
   if (ui.all) searchAll(); else paintMain();
 }

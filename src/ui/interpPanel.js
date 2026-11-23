@@ -9,7 +9,7 @@ import { modelSummary, methodInfo } from '../georef.js';
 import { sourceCitation } from '../caption.js';
 import {
   activeVersion, isLocked, georefOf, ensureInterpLayer, interpLayer, bumpInterp, ensureGeorefLayer, georefLayer,
-  addSourceFromFile, removeSource, addExampleSource, duplicateVersion, setGhost, deleteVersion,
+  addSourceFromFile, removeSource, duplicateVersion, setGhost, deleteVersion,
   findFeature, removeFeature, exportVersionGeoJSON, methodSheet,
 } from '../interp.js';
 import { openGeorefDialog } from './georefDialog.js';
@@ -81,14 +81,6 @@ function sourcesView(app) {
     el('label', { class: 'drop', for: 'interp-source-file' }, el('strong', {}, 'Agregar plano o mapa (imagen)'),
       el('span', {}, 'JPG, PNG o WebP: escaneo, fotografía en el archivo o captura de un mapa ajeno. Queda guardado en este navegador y viaja dentro del proyecto al guardarlo.')),
     inp,
-    el('div', { class: 'btn-row' }, button('Cargar el ejemplo: mensura de Lescano (1866)', async () => {
-      try {
-        await addExampleSource(app);
-        app.commit('layers'); app.renderLeft();
-        app.flyTo([-59.402, -34.503], 95);
-        app.toast('Ejemplo cargado: plano fotografiado en el archivo, con 4 puntos y transformación proyectiva. Abrí «Georreferenciar» para ver los puntos.');
-      } catch (err) { app.toast(`No se pudo cargar el ejemplo: ${err.message}`, 'error'); }
-    }, { kind: 'small ghost' })),
   );
   return wrap;
 }

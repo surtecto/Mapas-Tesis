@@ -10,10 +10,11 @@ import { SelectTool } from './ui/selectTool.js';
 import GeoJSON from 'ol/format/GeoJSON.js';
 import { transformExtent } from 'ol/proj.js';
 import { MapCtx } from './mapctx.js';
-import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom } from './projections.js';
+import { registerProjections, PROJECTIONS, projInfo, rotationForMeridian, lonLatTo, toLonLatFrom, utmCode } from './projections.js';
 import { drawOverlay, frameRect, hitTest, footprintAt, insetAt, scaleInfo, insetOutline, textPosition } from './overlay.js';
 import { History, normalizeState, loadLocal, serializeState, newText } from './state.js';
-import { TEMPLATES, createExampleProject, EXAMPLE_CREDIT, OLD_EXAMPLE_CREDIT } from './templates.js';
+import { TEMPLATES } from './templates.js';
+import { importFiles } from './ui/importDialog.js';
 import {
   getProject, getMap, listMaps, saveMap, createMap, renameMap, duplicateMap, deleteMap, saveProjectMeta, fixCredit, touchProject, snapshotMap, restorePrev,
   exportProject, importProject, migrateLegacy, defaultMeta, onProjectChange, listProjects,
@@ -81,9 +82,22 @@ class App {
     this.setupChannel();
     await this.setupFolder();
     await this.fixExampleCredit();
-    await this.seedFirstVisit();
     setTimeout(() => cachePrune(), 8000); // las teselas guardadas de más de 4 meses se descartan
     window.addEventListener('hashchange', () => this.route());
+    // soltar archivos sobre el editor los suma al mapa (vectores y ráster propios)
+    let dragDepth = 0;
+    const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+    const editing = () => this.current && this.state && !document.body.classList.contains('on-home') && !document.querySelector('dialog[open]');
+    window.addEventListener('dragenter', (e) => { if (hasFiles(e) && editing()) { dragDepth++; document.body.classList.add('drop-over'); } });
+    window.addEventListener('dragleave', () => { dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) document.body.classList.remove('drop-over'); });
+    window.addEventListener('dragover', (e) => { if (hasFiles(e) && editing()) e.preventDefault(); });
+    window.addEventListener('drop', (e) => {
+      dragDepth = 0; document.body.classList.remove('drop-over');
+      if (!hasFiles(e) || !editing()) return;
+      e.preventDefault();
+      const files = [...e.dataTransfer.files];
+      if (files.length) importFiles(this, files);
+    });
     window.addEventListener('beforeunload', () => { if (this.current && this.state) this.saveCurrent({ sync: true }); });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
@@ -112,36 +126,13 @@ class App {
 
   setHash(h) { if (location.hash !== h) history.replaceState(null, '', h); }
 
-  // Primera visita: quien abre la web por primera vez encuentra un ejemplo de Giles en la planoteca.
-  // Solo si este navegador no tiene ningún proyecto ni carpeta vinculada: nunca toca ni reemplaza mapas existentes,
-  // y queda anotado para no volver a agregarlo aunque después se borren todos los proyectos.
-  async seedFirstVisit() {
-    const KEY = 'mapas-tesis:ejemplo-inicial';
-    try { if (localStorage.getItem(KEY)) return; } catch (e) { return; }
-    try {
-      const had = (await listProjects()).length > 0 || folderStatus().linked;
-      try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { /* sin almacenamiento local */ }
-      if (had) return;
-      const t = TEMPLATES.find((x) => x.id === 'giles');
-      if (!t) return;
-      const p = await createExampleProject(t);
-      // miniatura ya dibujada, para que la planoteca no muestre una hoja vacía antes de abrir el mapa
-      try {
-        const blob = await (await fetch('data/ejemplos/pago-gilense-miniatura.jpg')).blob();
-        const thumb = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(blob); });
-        const m = await getMap(p.activeMapId);
-        if (m) await saveMap(m.id, m.state, { thumb });
-      } catch (e) { /* sin miniatura: se genera al abrir el mapa */ }
-    } catch (e) { /* sin ejemplo: la planoteca arranca vacía */ }
-  }
-
   // La versión 3.4.0 firmaba los ejemplos de Giles «Juan Patricio Addesso, Doctorado en Geografía, USAL», que detrás
   // de un nombre se lee como título obtenido. Se corrige una vez, solo en los proyectos que llevan ese texto tal cual.
   async fixExampleCredit() {
     const KEY = 'mapas-tesis:credito-ejemplo-2';
     try { if (localStorage.getItem(KEY)) return; } catch (e) { return; }
     try {
-      const fixed = await fixCredit(OLD_EXAMPLE_CREDIT, { author: EXAMPLE_CREDIT.author, institution: EXAMPLE_CREDIT.institution });
+      const fixed = await fixCredit({ author: 'Juan Patricio Addesso', institution: 'Doctorado en Geografía, USAL' }, { author: 'Arq. Juan Patricio Addesso', institution: 'doctorando en Geografía, Universidad del Salvador (USAL)' });
       try { localStorage.setItem(KEY, new Date().toISOString()); } catch (e) { /* sin almacenamiento local */ }
       if (fixed.length) setTimeout(() => this.toast(`Autoría corregida en ${fixed.length === 1 ? 'un proyecto copiado' : `${fixed.length} proyectos copiados`} del ejemplo de Giles: ahora dice «doctorando en Geografía».`), 900);
     } catch (e) { /* queda como estaba */ }
@@ -458,7 +449,7 @@ class App {
       ['view', 'Misma vista, página y estilo que el mapa actual, sin capas temáticas', 'Para una serie de figuras comparables.'],
       ['area', meta.area ? `Desde el área del proyecto (${meta.area.name || 'área de estudio'})` : 'Desde el área del proyecto (todavía no tiene)', 'Arma un mapa de localización nuevo.'],
       ['copy', 'Copia completa del mapa actual', 'Para probar otra versión sin tocar la original.'],
-      ['tpl', 'Desde un modelo de ejemplo', ''],
+      ['tpl', 'Desde una hoja en blanco', ''],
     ];
     const tplSel = el('select', { disabled: true }, ...TEMPLATES.map((t) => el('option', { value: t.id }, t.name)));
     tplSel.addEventListener('change', () => { opt.tpl = tplSel.value; });
@@ -1126,8 +1117,8 @@ class App {
     const sel = this.$.projection;
     if (!sel) return;
     if (![...sel.options].some((o) => o.value === code)) {
-      const p = PROJECTIONS.find((x) => x.code === code);
-      if (p) sel.append(el('option', { value: p.code, 'data-extra': '1' }, p.name));
+      const p = PROJECTIONS.find((x) => x.code === code) || (/^CONI:LAEA_/.test(code || '') ? projInfo(code) : null);
+      if (p) sel.append(el('option', { value: code, 'data-extra': '1' }, p.name));
     }
     sel.value = code;
   }
@@ -1135,14 +1126,19 @@ class App {
   // ---------- controles generales ----------
   setupChrome() {
     const projSel = this.$.projection;
-    const order = ['Argentina (POSGAR 2007)', 'Argentina bicontinental', 'UTM', 'Históricas', 'Mundiales'];
+    const order = ['América Latina', 'Argentina (POSGAR 2007)', 'Argentina bicontinental', 'Históricas', 'Mundiales'];
     for (const g of order) {
       const og = el('optgroup', { label: g });
       for (const p of PROJECTIONS.filter((x) => x.group === g && x.list !== false)) og.append(el('option', { value: p.code }, p.name));
+      if (g === 'América Latina') og.append(el('option', { value: 'auto-utm' }, 'UTM de la zona del mapa'));
       projSel.append(og);
     }
     this.showProjection(this.state.projection);
-    projSel.addEventListener('change', () => { this.setProjection(projSel.value); this.renderLeft(); });
+    projSel.addEventListener('change', () => {
+      let code = projSel.value;
+      if (code === 'auto-utm') { const c = this.state.view.center; code = utmCode(c[0], c[1]); }
+      this.setProjection(code); this.showProjection(code); this.renderLeft();
+    });
     setupSearch(this);
     this.$.title.value = this.state.title;
     this.$.title.addEventListener('change', async () => {

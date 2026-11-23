@@ -32,22 +32,6 @@ export const PROJECTIONS = [
     polar: true,
   },
   {
-    code: 'EPSG:32721', group: 'UTM',
-    name: 'UTM zona 21 Sur',
-    detail: 'WGS 84 / UTM zona 21S (EPSG:32721). Meridiano central 57°O: adecuada para mapas de detalle de la península Antártica norte (Potter, Esperanza, Marambio, Cerro Nevado).',
-    def: '+proj=utm +zone=21 +south +datum=WGS84 +units=m +no_defs',
-    extent: [-1500000, 0, 2500000, 10000000],
-    worldExtent: [-75, -85, -39, 0],
-  },
-  {
-    code: 'EPSG:32720', group: 'UTM',
-    name: 'UTM zona 20 Sur',
-    detail: 'WGS 84 / UTM zona 20S (EPSG:32720). Meridiano central 63°O: Shetland del Sur occidentales, Decepción, Brown, Primavera.',
-    def: '+proj=utm +zone=20 +south +datum=WGS84 +units=m +no_defs',
-    extent: [-1500000, 0, 2500000, 10000000],
-    worldExtent: [-81, -85, -45, 0],
-  },
-  {
     code: 'EPSG:5343', group: 'Argentina (POSGAR 2007)',
     name: 'POSGAR 2007 faja 1 (Gauss-Krüger, MC 72°O)',
     detail: 'POSGAR 2007 / Argentina 1 (EPSG:5343). Gauss-Krüger, meridiano central 72°O: marco geodésico oficial de la República Argentina (IGN). Conforme: ángulos y formas locales verdaderos dentro de la faja.',
@@ -173,6 +157,32 @@ export const PROJECTIONS = [
   },
 ];
 
+// UTM (WGS 84) para toda América Latina: zonas 11 a 22 al norte del ecuador y 17 a 25 al sur.
+// No se listan todas en el menú: «UTM de la zona del mapa» elige la que corresponde al centro de la vista.
+export function utmZone(lon) { return Math.max(1, Math.min(60, Math.floor((lon + 180) / 6) + 1)); }
+export function utmCode(lon, lat) { return `EPSG:${(lat >= 0 ? 32600 : 32700) + utmZone(lon)}`; }
+function utmEntry(zone, south) {
+  const cm = -183 + 6 * zone;
+  return {
+    code: `EPSG:${(south ? 32700 : 32600) + zone}`, group: 'UTM', list: false,
+    name: `UTM zona ${zone} ${south ? 'Sur' : 'Norte'}`,
+    detail: `WGS 84 / UTM zona ${zone}${south ? 'S' : 'N'} (EPSG:${(south ? 32700 : 32600) + zone}). Meridiano central ${Math.abs(cm)}°${cm < 0 ? 'O' : 'E'}: conforme, para mapas de detalle entre ${Math.abs(cm - 3)}° y ${Math.abs(cm + 3)}°${cm < 0 ? 'O' : 'E'}.`,
+    def: `+proj=utm +zone=${zone}${south ? ' +south' : ''} +datum=WGS84 +units=m +no_defs`,
+    extent: south ? [-1500000, 0, 2500000, 12500000] : [-1500000, -3000000, 2500000, 9400000],
+    worldExtent: south ? [cm - 18, -85, cm + 18, 22] : [cm - 18, -25, cm + 18, 84],
+  };
+}
+for (let z = 11; z <= 22; z++) PROJECTIONS.push(utmEntry(z, false));
+for (let z = 17; z <= 25; z++) PROJECTIONS.push(utmEntry(z, true));
+PROJECTIONS.push({
+  code: 'MT:LAEA_LATAM', group: 'América Latina',
+  name: 'América Latina (Lambert acimutal equivalente)',
+  detail: 'Lambert acimutal equivalente centrada en 10°S 70°O, WGS 84. Conserva las superficies: para mapas de México a Tierra del Fuego o de varios países.',
+  def: '+proj=laea +lat_0=-10 +lon_0=-70 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs',
+  extent: [-9000000, -9000000, 9000000, 9000000],
+  worldExtent: [-140, -75, 0, 60],
+});
+
 const byCode = new Map(PROJECTIONS.map((p) => [p.code, p]));
 
 export function projInfo(code) {
@@ -226,6 +236,17 @@ export function ensureProjection(code) {
   if (getProjection(code)) return code;
   const m = /^CONI:LAEA_(-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?)$/.exec(code || '');
   if (m) return ensureCustomLaea(m[1], m[2]);
+  // cualquier otra zona UTM (WGS 84) se define al vuelo: sirve para los ráster que el usuario importa
+  const u = /^EPSG:32([67])(\d\d)$/.exec(code || '');
+  if (u && Number(u[2]) >= 1 && Number(u[2]) <= 60) {
+    const e = utmEntry(Number(u[2]), u[1] === '7');
+    proj4.defs(e.code, e.def);
+    register(proj4);
+    const proj = getProjection(e.code);
+    proj.setExtent(e.extent); proj.setWorldExtent(e.worldExtent); proj.setGlobal(false);
+    PROJECTIONS.push(e); byCode.set(e.code, e);
+    return e.code;
+  }
   return 'EPSG:3031';
 }
 

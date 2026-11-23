@@ -14,6 +14,8 @@ const PROJ_SHORT = {
   'EPSG:3857': 'WGS 84 / Pseudo-Mercator (EPSG:3857)',
   'EPSG:4326': 'coordenadas geográficas WGS 84 (EPSG:4326)',
 };
+PROJ_SHORT['MT:LAEA_LATAM'] = 'Lambert acimutal equivalente centrada en 10°S 70°O, WGS 84';
+for (let z = 1; z <= 60; z++) { PROJ_SHORT[`EPSG:${32600 + z}`] = `WGS 84 / UTM zona ${z}N (EPSG:${32600 + z})`; PROJ_SHORT[`EPSG:${32700 + z}`] = `WGS 84 / UTM zona ${z}S (EPSG:${32700 + z})`; }
 for (let i = 1; i <= 7; i++) {
   PROJ_SHORT[`EPSG:${5342 + i}`] = `POSGAR 2007 / Argentina faja ${i}, Gauss-Krüger (EPSG:${5342 + i})`;
   PROJ_SHORT[`EPSG:${22190 + i}`] = `Campo Inchauspe / Argentina faja ${i}, Gauss-Krüger (EPSG:${22190 + i})`;
@@ -35,7 +37,7 @@ export function visibleDefs(state) {
   const insetOverrides = state.insets.flatMap((z) => Object.entries(z.layers || {}).filter(([, v]) => v === true).map(([k]) => k));
   for (const ls of state.layers) {
     if (!ls.visible && !insetOverrides.includes(ls.uid)) continue;
-    const d = ls.def === 'user' ? { cite: `${ls.name} (datos propios)`, attribution: ls.name } : defOf(ls);
+    const d = ls.def === 'user' ? (ls.source && ls.source.cite ? ls.source : { cite: `${ls.name} (datos propios)`, attribution: ls.name }) : defOf(ls);
     if (!d || !d.cite) continue;
     if (seen.has(d.cite)) continue;
     seen.add(d.cite);

@@ -55,7 +55,7 @@ export async function openGeorefDialog(app, src) {
   const mapDiv = el('div', { class: 'gr-map' });
   const baseObj = { v: ui.base };
   const baseSel = select(baseObj, 'v', BASES, { onChange: (v) => { ui.base = v; setBase(); } });
-  const snapChk = check(ui, 'snap', 'Imantar a vértices de mensuras', {});
+  const snapChk = check(ui, 'snap', 'Imantar a vértices de las capas vectoriales del mapa', {});
   const prevChk = check(ui, 'preview', 'Ver el plano superpuesto', { onChange: () => refreshPreview() });
   const prevRange = range(ui, 'previewOpacity', { min: 0.1, max: 1, step: 0.05, onInput: () => { if (previewLayer) previewLayer.setOpacity(ui.previewOpacity); }, format: (v) => `${Math.round(v * 100)}%` });
   const mapWrap = el('div', { class: 'gr-pane gr-terrain' },
@@ -182,7 +182,11 @@ export async function openGeorefDialog(app, src) {
   const snapSource = new VectorSource();
   try {
     const fmt = new GeoJSON();
-    for (const k of ['data/atlas_mensuras_ahg.geojson', 'data/atlas_registro_grafico_1874.geojson']) snapSource.addFeatures(fmt.readFeatures(EMBEDDED[k], { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' }));
+    // se imanta a los vértices de las capas vectoriales propias del mapa (y a las del atlas, si el mapa las usa)
+    for (const l of app.state.layers) {
+      if (l.def === 'user' && l.data && l.data.features) snapSource.addFeatures(fmt.readFeatures(l.data, { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' }));
+      else if (/^atlas-(mensuras|r1874)$/.test(l.def)) snapSource.addFeatures(fmt.readFeatures(EMBEDDED[l.def === 'atlas-mensuras' ? 'data/atlas_mensuras_ahg.geojson' : 'data/atlas_registro_grafico_1874.geojson'], { dataProjection: 'EPSG:4326', featureProjection: 'EPSG:3857' }));
+    }
   } catch (e) { /* noop */ }
   const snapLayer = new VectorLayer({ source: snapSource, style: new Style({ stroke: new Stroke({ color: 'rgba(255,214,0,0.9)', width: 1 }) }), visible: false });
   const baseLayer = new TileLayer({ preload: 1 });

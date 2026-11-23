@@ -1,4 +1,4 @@
-// Catálogo de capas: fuentes cartográficas para mapas de tesis (Argentina continental, Provincia de Buenos Aires, Pago Gilense y Antártida)
+// Catálogo de capas: fuentes cartográficas para mapas de tesis (América Latina, con detalle para la Argentina y la Provincia de Buenos Aires)
 // Todas las fuentes de este catálogo fueron verificadas con CORS habilitado (exportables a imagen).
 
 export const FONTS = [
@@ -7,12 +7,13 @@ export const FONTS = [
 ];
 
 export const GROUPS = [
-  { id: 'ign-base', title: 'Bases IGN (Argenmap)' },
-  { id: 'ign-arg', title: 'IGN: Argentina continental (vectorial, se carga según la vista)' },
-  { id: 'arba', title: 'Provincia de Buenos Aires: catastro ARBA' },
-  { id: 'atlas', title: 'Pago Gilense: Atlas de Mensuras de Giles (1825–1925)' },
-  { id: 'ign-vec', title: 'IGN: costas, islas, relieve y espacios marítimos' },
-  { id: 'ign-wms', title: 'IGN: servicios WMS (imagen oficial)' },
+  { id: 'mundo-base', title: 'Mapas base para toda América Latina' },
+  { id: 'ign-base', title: 'Argentina: bases IGN (Argenmap)' },
+  { id: 'ign-arg', title: 'Argentina: IGN (vectorial, se carga según la vista)' },
+  { id: 'arba', title: 'Argentina: Provincia de Buenos Aires, catastro ARBA' },
+  { id: 'atlas', title: 'Atlas de Mensuras de Giles (1825–1925)', own: true },
+  { id: 'ign-vec', title: 'Argentina: IGN, costas, islas, relieve y espacios marítimos' },
+  { id: 'ign-wms', title: 'Argentina: IGN, servicios WMS (imagen oficial)' },
   { id: 'costas', title: 'Países' },
   { id: 'relieve', title: 'Relieve, DEM y batimetría' },
   { id: 'sat', title: 'Imágenes satelitales' },
@@ -122,6 +123,28 @@ const IGN_VIEW_LAYERS = [
 
 export const CATALOG = [
   // ---------------- Bases IGN ----------------
+  // ---------------- Mapas base mundiales ----------------
+  { id: 'osm', group: 'mundo-base', name: 'OpenStreetMap', kind: 'raster', type: 'xyz', projection: 'EPSG:3857', maxZoom: 19,
+    url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© colaboradores de OpenStreetMap', cite: 'OpenStreetMap contributors. Mapa base OpenStreetMap (ODbL). https://www.openstreetmap.org/copyright',
+    note: 'Calles, caminos, hidrografía y toponimia de todo el mundo. Para figuras impresas conviene usarlo de referencia y dibujar encima las capas propias.' },
+  { id: 'carto-claro', group: 'mundo-base', name: 'Base clara sin rótulos (CARTO)', kind: 'raster', type: 'xyz', projection: 'EPSG:3857', maxZoom: 19,
+    url: 'https://basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap, © CARTO', cite: 'CARTO (2024). Positron (sin rótulos), sobre datos de OpenStreetMap (ODbL).',
+    note: 'Fondo gris muy claro, sin texto: deja la jerarquía a las capas de la tesis.' },
+  { id: 'carto-rotulos', group: 'mundo-base', name: 'Rótulos sueltos (CARTO)', kind: 'raster', type: 'xyz', projection: 'EPSG:3857', maxZoom: 19,
+    url: 'https://basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap, © CARTO', cite: 'CARTO (2024). Positron (solo rótulos), sobre datos de OpenStreetMap (ODbL).' },
+  { id: 'esri-topo', group: 'mundo-base', name: 'Topográfico mundial (Esri)', kind: 'raster', type: 'xyz', projection: 'EPSG:3857', maxZoom: 18,
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Esri, HERE, Garmin, FAO, NOAA, USGS', cite: 'Esri (2024). World Topographic Map.' },
+  { id: 'esri-gris', group: 'mundo-base', name: 'Lienzo gris claro (Esri)', kind: 'raster', type: 'xyz', projection: 'EPSG:3857', maxZoom: 16,
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Esri, HERE, Garmin', cite: 'Esri (2024). World Light Gray Base.' },
+  { id: 'esri-fisico', group: 'mundo-base', name: 'Mapa físico mundial (Esri)', kind: 'raster', type: 'xyz', projection: 'EPSG:3857', maxZoom: 8,
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Esri, US National Park Service', cite: 'Esri (2024). World Physical Map.', note: 'Solo para escalas chicas (países y regiones).' },
+
   { id: 'ign-argenmap', group: 'ign-base', name: 'Argenmap', kind: 'raster', type: 'xyz', url: IGN_TMS('capabaseargenmap'), projection: 'EPSG:3857', maxZoom: 18,
     attribution: 'IGN – Argenmap', cite: IGN_CITE, note: 'Mapa base oficial del IGN con toponimia argentina. Teselas Mercator: sin cobertura al sur de 85°S.' },
   { id: 'ign-gris', group: 'ign-base', name: 'Argenmap gris', kind: 'raster', type: 'xyz', url: IGN_TMS('mapabase_gris'), projection: 'EPSG:3857', maxZoom: 18,
@@ -199,10 +222,10 @@ export const CATALOG = [
   })),
 
   // ---------------- Atlas de Mensuras de Giles (copia local de los datos publicados) ----------------
-  { id: 'atlas-partido', group: 'atlas', name: 'Partido de San Andrés de Giles (contorno)', kind: 'vector', type: 'geojson', url: 'data/atlas_partido_contorno.geojson', geom: 'polygon', sem: 'study-area',
+  { id: 'atlas-partido', group: 'atlas', own: true, name: 'Partido de San Andrés de Giles (contorno)', kind: 'vector', type: 'geojson', url: 'data/atlas_partido_contorno.geojson', geom: 'polygon', sem: 'study-area',
     fields: [], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ polygon: { fill: '#ffffff', fillOpacity: 0, stroke: '#1d1d1d', strokeWidth: 1.1, dash: 'solid' } }) } },
-  { id: 'atlas-mensuras', group: 'atlas', name: 'Mensuras del Archivo Histórico de Geodesia (1825–1925)', kind: 'vector', type: 'geojson', url: 'data/atlas_mensuras_ahg.geojson', geom: 'polygon', sem: 'historic-parcel',
+  { id: 'atlas-mensuras', group: 'atlas', own: true, name: 'Mensuras del Archivo Histórico de Geodesia (1825–1925)', kind: 'vector', type: 'geojson', url: 'data/atlas_mensuras_ahg.geojson', geom: 'polygon', sem: 'historic-parcel',
     fields: ['n', 'tit', 'y', 'ag', 'ha', 'ed'], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ polygon: { fill: '#c9a66b', fillOpacity: 0.45, stroke: '#5b4630', strokeWidth: 0.35 }, label: { field: 'n', size: 5.5, color: '#3b2f22' },
       categorize: { field: 'y', mode: 'ranges', values: {}, ranges: [
@@ -210,23 +233,23 @@ export const CATALOG = [
         { min: 1870, max: 1884, color: '#dfc27d', label: '1870–1884' }, { min: 1885, max: 1899, color: '#80cdc1', label: '1885–1899' },
         { min: 1900, max: 1925, color: '#35978f', label: '1900–1925' }] } }) },
     note: '190 polígonos georreferenciados de duplicados de mensura (número de carpeta, titular, año, agrimensor, superficie). Coloreados por período; se puede cambiar el campo y los rangos.' },
-  { id: 'atlas-r1874', group: 'atlas', name: 'Registro gráfico c. 1874 (parcelas)', kind: 'vector', type: 'geojson', url: 'data/atlas_registro_grafico_1874.geojson', geom: 'polygon', sem: 'historic-parcel',
+  { id: 'atlas-r1874', group: 'atlas', own: true, name: 'Registro gráfico c. 1874 (parcelas)', kind: 'vector', type: 'geojson', url: 'data/atlas_registro_grafico_1874.geojson', geom: 'polygon', sem: 'historic-parcel',
     fields: ['t', 'ha', 'c', 'p'], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ polygon: { fill: '#e8dcc2', fillOpacity: 0.3, stroke: '#6b5a44', strokeWidth: 0.3, dash: 'solid' }, label: { field: 't', size: 4.5, color: '#4a3d2c' } }) } },
-  { id: 'atlas-urbanas', group: 'atlas', name: 'Planta urbana 1884 (parcelas y ocupación)', kind: 'vector', type: 'geojson', url: 'data/atlas_parcelas_urbanas_1884.geojson', geom: 'polygon', sem: 'historic-parcel',
+  { id: 'atlas-urbanas', group: 'atlas', own: true, name: 'Planta urbana 1884 (parcelas y ocupación)', kind: 'vector', type: 'geojson', url: 'data/atlas_parcelas_urbanas_1884.geojson', geom: 'polygon', sem: 'historic-parcel',
     fields: ['oc', 'pr', 'm2'], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ polygon: { fill: '#e8dcc2', fillOpacity: 0.6, stroke: '#5b4630', strokeWidth: 0.25 }, label: { field: 'pr', size: 4 },
       categorize: { field: 'oc', values: { MURO: '#b5523b', ALAMBRADO: '#c9a66b', CERCO: '#8fae6b', BALDIO: '#f1ead8', PLAZA: '#6f9f5a', IGLESIA: '#4a3d2c', CEMENTERIO: '#7d7d7d' } } }) } },
-  { id: 'atlas-caminos', group: 'atlas', name: 'Caminos, ferrocarril, tranvía y telégrafo (planos históricos)', kind: 'vector', type: 'geojson', url: 'data/atlas_caminos.geojson', geom: 'line', sem: 'historic-road',
+  { id: 'atlas-caminos', group: 'atlas', own: true, name: 'Caminos, ferrocarril, tranvía y telégrafo (planos históricos)', kind: 'vector', type: 'geojson', url: 'data/atlas_caminos.geojson', geom: 'line', sem: 'historic-road',
     fields: ['nm', 't', 'y', 'ob', 'km'], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ line: { color: '#6b4a2b', width: 0.9, dash: 'solid' }, label: { field: 'nm', size: 5, italic: true, color: '#4a3220' },
       categorize: { field: 't', values: { CAMINO: '#6b4a2b', FERROCARRIL: '#1d1d1d', 'TELÉGRAFO': '#7a7a7a', TRANWAY: '#8c2f1b' } } }) },
     note: 'Trazas dibujadas en los planos de mensura (con año y carpeta de origen).' },
-  { id: 'atlas-estancias1884', group: 'atlas', name: 'Estancias, puestos y pulperías (1884)', kind: 'vector', type: 'geojson', url: 'data/atlas_estancias_puestos_1884.geojson', geom: 'point', sem: 'historic-poi',
+  { id: 'atlas-estancias1884', group: 'atlas', own: true, name: 'Estancias, puestos y pulperías (1884)', kind: 'vector', type: 'geojson', url: 'data/atlas_estancias_puestos_1884.geojson', geom: 'point', sem: 'historic-poi',
     fields: ['d', 't'], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ point: { shape: 'square', size: 4, fill: '#8c2f1b', stroke: '#ffffff', strokeWidth: 0.4 }, label: { field: 'd', size: 5, italic: true, color: '#4a3220' },
       categorize: { field: 't', values: { Estancia: '#8c2f1b', Puesto: '#c47a2c', Pulperia: '#2f5d8c', Posta: '#5a3d7a' } } }) } },
-  { id: 'atlas-poblamiento', group: 'atlas', name: 'Poblamiento dibujado en las mensuras (casas, puestos, taperas)', kind: 'vector', type: 'geojson', url: 'data/atlas_poblamiento_mensuras.geojson', geom: 'point', sem: 'historic-poi',
+  { id: 'atlas-poblamiento', group: 'atlas', own: true, name: 'Poblamiento dibujado en las mensuras (casas, puestos, taperas)', kind: 'vector', type: 'geojson', url: 'data/atlas_poblamiento_mensuras.geojson', geom: 'point', sem: 'historic-poi',
     fields: ['d', 't', 'n'], attribution: ATLAS_ATTR, cite: ATLAS_CITE,
     defaults: { style: baseStyle({ point: { shape: 'circle', size: 2.6, fill: '#5b4630', stroke: '#ffffff', strokeWidth: 0.3 }, label: { field: 'd', size: 4.5 },
       categorize: { field: 't', values: { CASA: '#5b4630', PUESTO: '#c47a2c', PULPERIA: '#2f5d8c', TAPERA: '#9a9a9a', ARRENDATARIO: '#7a9a4a', RANCHO: '#a0522d', POSTA: '#5a3d7a' } } }) } },
@@ -260,7 +283,12 @@ export const CATALOG = [
     defaults: { style: baseStyle({ polygon: { fill: '#f4f7f8', fillOpacity: 1, stroke: '#41535e', strokeWidth: 0.35 },
       categorize: { field: 'surface', values: { land: '#f4f7f8', 'ice shelf': '#dbe9f0', 'ice tongue': '#dbe9f0', rumple: '#e7eff3' } } }) },
     note: 'Resolución media o alta según la escala (cambia sola). Superficies: tierra, barrera de hielo, lengua de hielo.' },
-  { id: 'ne-paises', sem: 'land', group: 'costas', name: 'Países (Natural Earth, vista argentina)', kind: 'vector', type: 'geojson', url: 'data/paises_ne_vista_arg.geojson', geom: 'polygon',
+  { id: 'ne-america', sem: 'land', group: 'costas', name: 'Países de América (Natural Earth)', kind: 'vector', type: 'geojson', url: 'data/paises_america.geojson', geom: 'polygon',
+    fields: ['nombre', 'iso'],
+    attribution: 'Natural Earth 1:50M', cite: 'Natural Earth (2024). Admin 0 – Countries, 1:50M. https://www.naturalearthdata.com',
+    defaults: { style: baseStyle({ polygon: { fill: '#e6e2d8', fillOpacity: 1, stroke: '#7d7a72', strokeWidth: 0.35 }, label: { field: 'nombre' } }) },
+    note: 'De Canadá a Tierra del Fuego, generalizado para mapas de ubicación. La Argentina incluye Islas Malvinas, Georgias y Sandwich del Sur. Para límites internos usá «Límites administrativos» más abajo.' },
+  { id: 'ne-paises', sem: 'land', group: 'costas', name: 'Sudamérica y Atlántico sur (Natural Earth, vista argentina)', kind: 'vector', type: 'geojson', url: 'data/paises_ne_vista_arg.geojson', geom: 'polygon',
     fields: ['nombre', 'iso'],
     attribution: 'Natural Earth 1:10M', cite: 'Natural Earth (2024). Admin 0 – Countries, 1:10M, versión con punto de vista argentino. https://www.naturalearthdata.com',
     defaults: { style: baseStyle({ polygon: { fill: '#e6e2d8', fillOpacity: 1, stroke: '#7d7a72', strokeWidth: 0.35 },

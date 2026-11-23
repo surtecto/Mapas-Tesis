@@ -1,6 +1,7 @@
 // Primer mapa de un proyecto nuevo: se arma a partir de los datos del proyecto, el área de trabajo y las opciones del asistente.
 import { emptyState, newLayerState, newInset, newText, mergeDeep } from './state.js';
-import { registerProjections, posgarCode, gkFaja } from './projections.js';
+import { registerProjections, posgarCode, gkFaja, utmCode, ensureCustomLaea } from './projections.js';
+import { countryAtLL, countryBBox } from './latam.js';
 import { getMedia, applyMediaPage } from './media.js';
 import { getTheme, applyTheme } from './themes.js';
 import { baseStyle } from './catalog.js';
@@ -41,16 +42,23 @@ export function buildFirstMap(meta, area, opts = {}) {
   s.page.margins = portrait ? { top: 7, right: 6, bottom: 8, left: 10 } : { top: 8, right: 8, bottom: 10, left: 12 };
   const f = { x: s.page.margins.left, y: s.page.margins.top, w: s.page.widthMM - s.page.margins.left - s.page.margins.right, h: s.page.heightMM - s.page.margins.top - s.page.margins.bottom };
   // vista
-  const bbox = area && area.bbox ? area.bbox : [-73.6, -55.1, -53.6, -21.8];
+  const bbox = area && area.bbox ? area.bbox : [-112, -56, -34, 30];
   const center = area && area.center ? area.center : [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];
   let mpm = fitMpm(bbox, f);
   if (area && area.geom && area.geom.type === 'Point') mpm = Math.max(mpm, 60);
-  s.projection = opts.projection || (center[1] < -60 ? 'EPSG:3031' : mpm > 9000 ? 'CONI:BICONT' : posgarCode(center[0]));
+  // país del área: en la Argentina se usa el marco oficial (POSGAR 2007 o bicontinental); en el resto de América Latina, UTM de la zona
+  const country = countryAtLL(center[0], center[1]);
+  const inArg = !country ? (center[0] > -74 && center[0] < -53 && center[1] > -56 && center[1] < -21) : country.iso === 'ARG';
+  const auto = !area ? 'MT:LAEA_LATAM' : center[1] < -60 ? 'EPSG:3031'
+    : inArg ? (mpm > 9000 ? 'CONI:BICONT' : posgarCode(center[0]))
+      : (mpm > 9000 ? ensureCustomLaea(Math.round(center[1]), Math.round(center[0])) : utmCode(center[0], center[1]));
+  s.projection = opts.projection === 'auto-utm' ? utmCode(center[0], center[1]) : (opts.projection || auto);
   s.view = { center, mpm, rotation: 0 };
   // capas
   const layers = [];
   if (opts.start === 'satellite') layers.push(L('esri-mundo', { opacity: 1 }));
   for (const id of opts.layers || []) {
+    if (!inArg && /^(ign-|arba-)/.test(id)) continue; // capas oficiales argentinas: fuera del país no traen nada
     try { layers.push(L(id)); } catch (e) { /* capa desconocida */ }
   }
   const isPoint = !!(area && area.geom && area.geom.type === 'Point');
@@ -63,11 +71,24 @@ export function buildFirstMap(meta, area, opts = {}) {
   // mapa de ubicación
   if (opts.context !== false && mpm < 9000) {
     const w = Math.min(f.w, f.h) * 0.27, h = w * 1.3;
-    const ne = L('ne-paises', { visible: false, legend: { show: false }, style: { polygon: { fill: '#e6dfcc', stroke: '#8a8270', strokeWidth: 0.25 }, categorize: { field: 'iso', values: { ARG: '#d9cfb5' } } } });
-    s.layers.unshift(ne);
-    const z = newInset({ name: 'Ubicación en la Argentina', mode: 'context', shape: 'rect', x: f.x + 3, y: f.y + 3, w, h, center: [-61, -40], mpm: 70000 * (40 / w), projection: 'CONI:BICONT', bg: '#f1ecdf', border: { color: '#2b2b2b', width: 0.5, dash: 'solid' }, connector: { type: 'none', color: '#2b2b2b', width: 0.5, dash: 'solid' } });
-    z.layers = Object.fromEntries(s.layers.map((l) => [l.uid, l === ne]));
-    s.insets = [z];
+    if (inArg) {
+      const ne = L('ne-paises', { visible: false, legend: { show: false }, style: { polygon: { fill: '#e6dfcc', stroke: '#8a8270', strokeWidth: 0.25 }, categorize: { field: 'iso', values: { ARG: '#d9cfb5' } } } });
+      s.layers.unshift(ne);
+      const z = newInset({ name: 'Ubicación en la Argentina', mode: 'context', shape: 'rect', x: f.x + 3, y: f.y + 3, w, h, center: [-61, -40], mpm: 70000 * (40 / w), projection: 'CONI:BICONT', bg: '#f1ecdf', border: { color: '#2b2b2b', width: 0.5, dash: 'solid' } });
+      z.layers = Object.fromEntries(s.layers.map((l) => [l.uid, l === ne]));
+      s.insets = [z];
+    } else {
+      // resto de América Latina: el país resaltado entre sus vecinos, en una proyección equivalente centrada en él
+      const iso = country ? country.iso : '';
+      const cb = (iso && countryBBox(iso)) || [center[0] - 12, center[1] - 12, center[0] + 12, center[1] + 12];
+      const cc = [(cb[0] + cb[2]) / 2, (cb[1] + cb[3]) / 2];
+      const wm = (cb[2] - cb[0]) * 111320 * Math.cos((cc[1] * Math.PI) / 180), hm = (cb[3] - cb[1]) * 110540;
+      const ne = L('ne-america', { visible: false, legend: { show: false }, style: { polygon: { fill: '#e6dfcc', stroke: '#8a8270', strokeWidth: 0.25 }, categorize: { field: 'iso', values: iso ? { [iso]: '#d9cfb5' } : {} } } });
+      s.layers.unshift(ne);
+      const z = newInset({ name: country ? `Ubicación en ${country.nombre}` : 'Ubicación', mode: 'context', shape: 'rect', x: f.x + 3, y: f.y + 3, w, h, center: cc, mpm: Math.max(wm / w, hm / h) * 1.35, projection: ensureCustomLaea(Math.round(cc[1]), Math.round(cc[0])), bg: '#f1ecdf', border: { color: '#2b2b2b', width: 0.5, dash: 'solid' } });
+      z.layers = Object.fromEntries(s.layers.map((l) => [l.uid, l === ne]));
+      s.insets = [z];
+    }
   }
   // sitio: en un área puntual es el símbolo principal; en un área poligonal solo se marca en el mapa de ubicación
   if (area && area.center) {

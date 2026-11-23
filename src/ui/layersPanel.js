@@ -6,7 +6,8 @@ import { groupsList } from './featureInspector.js';
 import { CATALOG, GROUPS, getDef, defOf, RAMPS, baseStyle, FONTS } from '../catalog.js';
 import { DASH_OPTIONS } from '../styles.js';
 import { newLayerState } from '../state.js';
-import { fileToGeoJSON } from './importers.js';
+import { importFiles, ACCEPT } from './importDialog.js';
+import { COUNTRIES, ADM_LEVELS, OSM_THEMES, countryAtLL, fetchBoundaries, boundariesLayer, fetchOsm, osmLayer } from '../latam.js';
 import { projInfo } from '../projections.js';
 import { openServicesDialog } from './servicesDialog.js';
 import { openImageryDialog } from './imageryDialog.js';
@@ -71,10 +72,11 @@ export function renderLayersPanel(app, root) {
     el('h2', { class: 'panel-h' }, 'Agregar capas'),
     el('button', { type: 'button', class: 'svc-open', onclick: () => openServicesDialog(app) },
       el('strong', {}, 'Servicios oficiales'),
-      el('span', {}, 'IGN, INA, INDEC, INTA, Ambiente, SEGEMAR, ARBA, Estadística bonaerense y el catálogo completo de IDERA. Capas vectoriales que se pueden restilizar, filtrar y exportar.')),
+      el('span', {}, 'Organismos de la Argentina (IGN, INDEC, INTA, ARBA y todo IDERA), un directorio por país de América Latina y cualquier servicio WFS, WMS o ArcGIS del que tengas la dirección. Las capas vectoriales se pueden restilizar, filtrar y exportar.')),
     el('button', { type: 'button', class: 'svc-open img', onclick: () => openImageryDialog(app) },
       el('strong', {}, 'Imágenes y coberturas'),
       el('span', {}, 'Sentinel-2 y Landsat por fecha (desde 1972), mosaicos anuales, cobertura del suelo 2017–2025 con superficies y cambios, y clasificación propia.')),
+    latamView(app),
     catalogView(app),
     el('h2', { class: 'panel-h' }, 'Datos propios'),
     importView(app),
@@ -223,7 +225,7 @@ function serviceEditor(app, ls, def) {
   if (s && s._truncated) box.append(el('p', { class: 'warn-note' }, 'El servidor devolvió el máximo de objetos que permite: acercá la vista o filtrá para ver todo.'));
   // filtro del servidor (CQL en GeoServer, where en ArcGIS)
   const fld = def.type === 'svc-arcgis' ? 'where' : 'cql';
-  const srvIn = el('input', { type: 'text', value: def[fld] || '', placeholder: def.type === 'svc-arcgis' ? "PARTIDO = 'San Andrés de Giles'" : "nam = 'San Andrés de Giles'" });
+  const srvIn = el('input', { type: 'text', value: def[fld] || '', placeholder: def.type === 'svc-arcgis' ? "NOMBRE = 'Colonia'" : "nam = 'Colonia'" });
   box.append(details('Filtro en el servidor', !!def[fld],
     el('p', { class: 'note' }, def.type === 'svc-arcgis' ? 'Expresión SQL del servidor ArcGIS: solo llegan los objetos que la cumplen.' : 'Expresión CQL (GeoServer): solo llegan los objetos que la cumplen. Los textos van entre comillas simples.'),
     el('div', { class: 'btn-row' }, srvIn, button('Aplicar', () => { ls.svc[fld] = srvIn.value.trim(); reload(); }, { kind: 'small' }))));
@@ -373,7 +375,7 @@ function catalogView(app) {
   const proj = projInfo(app.state.projection);
   for (const g of GROUPS) {
     if (g.hidden) continue;
-    const items = CATALOG.filter((d) => d.group === g.id && (!d.antarctic || present.has(d.id)));
+    const items = CATALOG.filter((d) => d.group === g.id && ((!d.antarctic && !d.own) || present.has(d.id)));
     if (!items.length) continue;
     const list = el('ul', { class: 'catalog-list' });
     for (const d of items) {
@@ -392,43 +394,69 @@ function catalogView(app) {
         el('div', { class: 'catalog-text' }, el('span', { class: 'catalog-name' }, d.name), d.note || warn ? el('span', { class: 'catalog-note' }, warn || d.note) : null),
         add));
     }
-    wrap.append(details(g.title, g.id === 'ign-arg', list));
+    wrap.append(details(g.title, g.id === 'mundo-base', list));
   }
   return wrap;
 }
 
 function importView(app) {
-  const inp = el('input', { type: 'file', accept: '.geojson,.json,.kml,.gpx,.csv,.tsv,.txt,.zip', multiple: true, class: 'file-input', id: 'import-layer-file' });
+  const inp = el('input', { type: 'file', accept: ACCEPT, multiple: true, class: 'file-input', id: 'import-layer-file' });
   inp.addEventListener('change', async () => {
-    for (const file of inp.files) {
-      try {
-        const results = await fileToGeoJSON(file);
-        for (const r of results) {
-          const n = (r.geojson.features || []).length;
-          if (!n) { app.toast(`«${r.name}» no tiene elementos con geometría.`, 'warn'); continue; }
-          const ls = {
-            uid: uid('L'), def: 'user', name: r.name.replace(/\.(geojson|json|kml|gpx|csv|tsv|txt)$/i, ''), visible: true, opacity: 1, blend: 'normal',
-            adjust: { brightness: 100, contrast: 100, saturate: 100, grayscale: 0 }, clip: 'none',
-            style: baseStyle({ point: { fill: '#7a3fb0' }, line: { color: '#7a3fb0', width: 0.8 }, polygon: { fill: '#7a3fb0', fillOpacity: 0.25, stroke: '#7a3fb0', strokeWidth: 0.6 }, label: { field: '' } }),
-            params: {}, legend: { show: true, label: r.name.replace(/\.[^.]+$/, '') }, insets: {}, rev: 0, _styleVersion: 0, data: r.geojson,
-          };
-          const props = (r.geojson.features.find((f) => f.properties) || {}).properties || {};
-          ls.style.label.field = Object.keys(props).find((k) => /nombre|name|sitio|site/i.test(k)) || Object.keys(props)[0] || '';
-          app.state.layers.splice(app.state.layers.findIndex((l) => l.def === 'graticule') >= 0 ? app.state.layers.findIndex((l) => l.def === 'graticule') : app.state.layers.length, 0, ls);
-          app.ui.expanded.add(ls.uid);
-          app.toast(`Importado: ${ls.name} (${n} elementos, ${geomOf(ls) === 'point' ? 'puntos' : geomOf(ls) === 'line' ? 'líneas' : 'polígonos'})`);
-        }
-      } catch (err) {
-        app.toast(`No se pudo importar «${file.name}»: ${err.message}`, 'error');
-      }
-    }
+    const files = [...inp.files];
     inp.value = '';
-    app.commit('layers');
-    app.renderLeft();
+    await importFiles(app, files);
   });
   return el('div', { class: 'import-box' },
     el('label', { class: 'drop', for: 'import-layer-file' },
-      el('strong', {}, 'Elegir archivos'),
-      el('span', {}, 'GeoJSON, KML, GPX, CSV con latitud/longitud o Shapefile comprimido (.zip). Coordenadas WGS 84.')),
+      el('strong', {}, 'Elegir archivos (o soltarlos sobre el mapa)'),
+      el('span', {}, 'Vectores: GeoJSON, KML o KMZ, GPX, CSV con latitud y longitud, Shapefile (el .zip, o el .shp junto con su .dbf y .prj).'),
+      el('span', {}, 'Ráster: GeoTIFF de imágenes satelitales procesadas, clasificaciones, índices (NDVI, NDWI) o modelos de elevación; PNG o JPG con su archivo .pgw, .jgw o .wld.')),
     inp);
+}
+
+// Fuentes que cubren toda América Latina: límites administrativos por país y datos de OpenStreetMap de lo que se ve en el mapa
+function latamView(app) {
+  const c = app.state.view.center;
+  const here = countryAtLL(c[0], c[1]);
+  const ui = app.ui.latam || (app.ui.latam = { iso: '', adm: 'ADM1', onlyView: true, theme: 'rios' });
+  if (!ui.iso || ui.auto === ui.iso) { ui.iso = here && COUNTRIES.some((k) => k.iso === here.iso) ? here.iso : (ui.iso || 'ARG'); ui.auto = ui.iso; }
+  const insert = (ls) => {
+    const st = app.state;
+    const g = st.layers.findIndex((l) => l.def === 'graticule');
+    st.layers.splice(g >= 0 ? g : st.layers.length, 0, ls);
+    app.ui.expanded.add(ls.uid);
+    app.commit('layers'); app.renderLeft();
+  };
+  const busy = async (btn, label, fn) => {
+    const t = btn.textContent;
+    btn.disabled = true; btn.textContent = label;
+    try { await fn(); } catch (e) { app.toast(`No se pudo traer: ${e.message}.`, 'error'); }
+    btn.disabled = false; btn.textContent = t;
+  };
+  const gbBtn = button('Traer límites', () => busy(gbBtn, 'Descargando…', async () => {
+    const r = await fetchBoundaries(ui.iso, ui.adm, ui.onlyView && ui.adm === 'ADM2' ? app.viewBBoxLL() : null);
+    if (!r.kept) { app.toast('Ninguna unidad de ese nivel toca la vista del mapa. Movete al país o destildá «solo las que tocan la vista».', 'warn'); return; }
+    insert(boundariesLayer(ui.iso, ui.adm, r.geojson));
+    app.toast(`Límites agregados: ${r.kept.toLocaleString('es-AR')} unidades${r.kept < r.total ? ` de ${r.total.toLocaleString('es-AR')}` : ''}. Quedan guardados dentro del mapa.`);
+  }), { kind: 'small' });
+  const osmBtn = button('Traer lo que hay en la vista', () => busy(osmBtn, 'Consultando…', async () => {
+    const r = await fetchOsm(ui.theme, app.viewBBoxLL());
+    if (!r.geojson.features.length) { app.toast(`OpenStreetMap no tiene «${r.theme.name.toLowerCase()}» cargado en esta vista.`, 'warn'); return; }
+    insert(osmLayer(r.theme, r.geojson, ''));
+    app.toast(`${r.theme.name}: ${r.geojson.features.length.toLocaleString('es-AR')} elementos de OpenStreetMap, guardados dentro del mapa.`);
+  }), { kind: 'small' });
+  const onlyChk = check(ui, 'onlyView', 'Solo las unidades que tocan la vista', {});
+  const paintOnly = () => { onlyChk.hidden = ui.adm !== 'ADM2'; };
+  paintOnly();
+  return details('América Latina: límites y datos de OpenStreetMap', false,
+    el('p', { class: 'note' }, 'Sirven para cualquier país, de México a Tierra del Fuego. Se descargan una vez y quedan dentro del mapa como capas vectoriales propias: se restilizan, se filtran, se eligen objetos y salen en la exportación.'),
+    el('h3', { class: 'mini-h' }, 'Límites administrativos'),
+    inlineFields(field('País', select(ui, 'iso', COUNTRIES.map((k) => [k.iso, k.name]).sort((a, b) => a[1].localeCompare(b[1], 'es')), {})), field('Nivel', select(ui, 'adm', ADM_LEVELS, { onChange: paintOnly }))),
+    onlyChk,
+    el('div', { class: 'btn-row' }, gbBtn),
+    el('p', { class: 'note' }, 'Fuente: geoBoundaries (gbOpen, CC BY 4.0), versión simplificada para cartografía. No es el límite oficial de cada instituto geográfico: para trabajo de detalle, cargá el servicio oficial del país.'),
+    el('h3', { class: 'mini-h' }, 'OpenStreetMap, por tema'),
+    field('Tema', select(ui, 'theme', OSM_THEMES.map((t) => [t.id, t.name]), {}), 'Trae lo que está dentro de la vista del mapa. Los temas de detalle (arroyos, caminos rurales, usos) piden acercarse.'),
+    el('div', { class: 'btn-row' }, osmBtn),
+    el('p', { class: 'note' }, 'Datos de colaboradores de OpenStreetMap (ODbL): la cobertura es despareja; conviene contrastarla con la imagen satelital.'));
 }

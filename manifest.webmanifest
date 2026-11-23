@@ -1,7 +1,7 @@
 {
   "name": "Mapas-Tesis",
   "short_name": "Mapas-Tesis",
-  "description": "Mapas para tesis e investigación: capas oficiales, imágenes satelitales, selección por variable, planos históricos y salida para imprimir, proyectar o publicar.",
+  "description": "Mapas para tesis e investigación en América Latina: geoservicios oficiales, límites, OpenStreetMap, imágenes satelitales, datos propios, planos históricos y salida para imprimir, proyectar o publicar.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",

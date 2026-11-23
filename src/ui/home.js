@@ -21,7 +21,8 @@ import { readTheme, synthesize, readPlace } from '../interpret.js';
 import { TEMPLATES, createExampleProject } from '../templates.js';
 import { buildFirstMap } from '../starter.js';
 import { searchPlaces } from './search.js';
-import { gkFaja } from '../projections.js';
+import { gkFaja, utmZone } from '../projections.js';
+import { countryAtLL, adminAt, fetchBoundaries, boundariesLayer, fetchOsm, osmLayer, OSM_THEMES } from '../latam.js';
 import { getDef } from '../catalog.js';
 import { confirmDialog, promptDialog } from './dialogs.js';
 import { cacheInfo, cacheClear } from '../layercache.js';
@@ -113,15 +114,15 @@ export async function renderHome(app, { sync = true } = {}) {
   const start = el('section', { class: 'home-start', 'aria-labelledby': 'h-start' },
     el('h1', { id: 'h-start', class: 'visually-hidden' }, 'Empezar'),
     blank,
-    el('h2', {}, 'O partir de un ejemplo'),
-    el('p', { class: 'home-note' }, 'Se copia como proyecto propio: podés cambiarlo todo sin tocar el original.'),
-    el('div', { class: 'examples' }, ...TEMPLATES.filter((t) => t.group === 'Tesis' && t.id !== 'argentina').map(exampleBtn)));
+    el('h2', {}, 'O partir de una hoja ya encuadrada'),
+    el('p', { class: 'home-note' }, 'Mapas en blanco de América Latina, listos para sumar capas. Para un país, una provincia o un municipio, usá «Nuevo proyecto» y elegí el lugar.'),
+    el('div', { class: 'examples' }, ...TEMPLATES.map(exampleBtn)));
 
   const list = el('div', { class: 'project-grid' });
   if (!projects.length) {
     list.append(el('div', { class: 'empty-projects' },
       el('strong', {}, 'Esta computadora todavía no tiene proyectos.'),
-      el('span', {}, 'Empezá uno con la hoja en blanco, copiá un ejemplo o importá el archivo .json que exportaste en otra computadora.')));
+      el('span', {}, 'Empezá uno con «Nuevo proyecto», partí de una hoja ya encuadrada o importá el archivo .json que exportaste en otra computadora.')));
   }
   for (const p of projects) list.append(projectSheet(app, p));
   const fstrip = folderStrip(app, projects);
@@ -149,7 +150,31 @@ export async function renderHome(app, { sync = true } = {}) {
   );
   root.append(
     topBar('Cartografía para investigar, interpretar y mostrar', [el('button', { type: 'button', class: 'btn ghost', onclick: () => importInput.click() }, 'Importar proyecto'), importInput]),
+    whatsNew(app),
     el('main', { class: `home-main${projects.length ? ' has-projects' : ''}` }, start, libr));
+}
+
+// ---------- novedades de la versión y elección de versión ----------
+const NEWS_KEY = 'mapas-tesis:novedades-3.5';
+function whatsNew(app) {
+  let seen = false;
+  try { seen = !!localStorage.getItem(NEWS_KEY); } catch (e) { seen = false; }
+  const versions = el('p', { class: 'wn-versions' },
+    el('span', {}, 'Versión 3.5 · '),
+    el('a', { href: 'anterior/' }, 'usar la versión anterior (3.4)'),
+    el('span', {}, '. Las dos trabajan con los mismos proyectos guardados en esta computadora y con la misma carpeta. Un mapa que use funciones nuevas solo se abre en la 3.5: la anterior avisa y no lo toca.'));
+  const body = el('div', { class: 'wn-body' },
+    el('ul', {},
+      el('li', {}, el('strong', {}, 'Toda América Latina. '), 'De México a Tierra del Fuego: el asistente reconoce el país, usa la proyección UTM de la zona y arma el mapa de ubicación.'),
+      el('li', {}, el('strong', {}, 'Límites y OpenStreetMap. '), 'Estados, provincias y municipios de cualquier país; ríos, rutas, localidades y áreas protegidas de la vista, como capas propias.'),
+      el('li', {}, el('strong', {}, 'Geoservicios por país y catastros. '), 'Directorio comprobado de organismos de la región, catastros provinciales argentinos y de otros países, y un campo para pegar la dirección de cualquier servicio.'),
+      el('li', {}, el('strong', {}, 'Tus imágenes y clasificaciones. '), 'GeoTIFF de imágenes satelitales procesadas, clasificaciones con su leyenda, índices y modelos de elevación; también KMZ y Shapefile suelto. Se pueden soltar sobre el mapa.'),
+      el('li', {}, el('strong', {}, 'Figura georreferenciada. '), 'La exportación puede sumar el archivo para abrirla en QGIS en su lugar.')),
+    el('p', { class: 'wn-safe' }, 'Tus proyectos anteriores están donde los dejaste y se abren igual que antes.'),
+    versions);
+  const d = el('details', { class: 'whatsnew', open: !seen }, el('summary', {}, 'Novedades de la versión 3.5'), body);
+  d.addEventListener('toggle', () => { if (!d.open) { try { localStorage.setItem(NEWS_KEY, '1'); } catch (e) { /* sin almacenamiento local */ } } });
+  return d;
 }
 
 // ---------- carpeta de proyectos ----------
@@ -372,7 +397,7 @@ export function renderWizard(app, preset = {}) {
   function stepPlace() {
     const mapDiv = el('div', { class: 'wiz-map' });
     const info = el('div', { class: 'wiz-area-info' });
-    const search = el('input', { type: 'search', placeholder: 'Partido, localidad o coordenadas', 'aria-label': 'Buscar un lugar' });
+    const search = el('input', { type: 'search', placeholder: 'Ciudad, municipio, provincia, país o coordenadas', 'aria-label': 'Buscar un lugar' });
     const results = el('ul', { class: 'place-results wiz-results', hidden: true });
     const hint = el('p', { class: 'wiz-map-hint', hidden: true });
     const tool = { mode: 'none' };
@@ -393,7 +418,7 @@ export function renderWizard(app, preset = {}) {
     const base = new TileLayer();
     const labels = new TileLayer({ source: new XYZ({ url: IGN('mapabase_hibrido'), crossOrigin: 'anonymous' }) });
     olMap = new OlMap({ target: mapDiv, controls: [], layers: [base, labels, areaLayerOl], interactions: defaultInteractions({ altShiftDragRotate: false, pinchRotate: false }),
-      view: new View({ center: fromLonLat(w.area ? w.area.center : [-62, -37.5]), zoom: w.area ? 10 : 4.6, maxZoom: 19 }) });
+      view: new View({ center: fromLonLat(w.area ? w.area.center : [-68, -14]), zoom: w.area ? 10 : 3.3, maxZoom: 19 }) });
     function setBase() {
       base.setSource(new XYZ({ url: w.start === 'satellite' ? ESRI_IMG : IGN('mapabase_gris'), crossOrigin: 'anonymous', maxZoom: 19 }));
       labels.setVisible(w.start === 'satellite');
@@ -417,7 +442,7 @@ export function renderWizard(app, preset = {}) {
       paintInfo();
     };
     const HINTS = {
-      partido: 'Tocá el mapa dentro del partido o departamento.',
+      partido: 'Tocá el mapa dentro del municipio, partido, departamento o cantón.',
       point: 'Tocá el mapa donde está el sitio.',
       box: 'Tocá una esquina, y después la opuesta.',
       polygon: 'Tocá para agregar vértices; doble toque para cerrar.',
@@ -435,19 +460,25 @@ export function renderWizard(app, preset = {}) {
         olMap.addInteraction(draw);
       }
     };
-    [['partido', 'Elegir un partido'], ['point', 'Marcar un punto'], ['box', 'Dibujar un rectángulo'], ['polygon', 'Dibujar un polígono']].forEach(([m, t]) => {
+    [['partido', 'Elegir un municipio o partido'], ['point', 'Marcar un punto'], ['box', 'Dibujar un rectángulo'], ['polygon', 'Dibujar un polígono']].forEach(([m, t]) => {
       toolBtns.append(el('button', { type: 'button', class: 'btn small', dataset: { mode: m }, 'aria-pressed': 'false', onclick: () => setTool(tool.mode === m ? 'none' : m) }, t));
     });
     olMap.on('singleclick', async (e) => {
       if (tool.mode !== 'partido') return;
       const ll = toLonLat(e.coordinate);
-      hint.textContent = 'Consultando al IGN…';
+      const c = countryAtLL(ll[0], ll[1]);
+      const arg = c ? c.iso === 'ARG' : false;
+      hint.textContent = arg ? 'Consultando al IGN…' : 'Consultando a OpenStreetMap…';
       try {
-        const f = await partidoAt(ll[0], ll[1]);
-        if (!f) { hint.textContent = 'No hay un partido o departamento del IGN en ese punto. Probá otro lugar.'; return; }
-        setArea(f.geometry, f.properties.nam || f.properties.fna);
+        if (arg) {
+          const f = await partidoAt(ll[0], ll[1]);
+          if (f) { setArea(f.geometry, f.properties.nam || f.properties.fna); setTool('none'); return; }
+        }
+        const a = await adminAt(ll[0], ll[1]);
+        if (!a) { hint.textContent = 'No encontré una unidad administrativa en ese punto. Probá otro lugar o dibujá el área.'; return; }
+        setArea(a.geometry, a.name);
         setTool('none');
-      } catch (err) { hint.textContent = `El IGN no respondió (${err.message}). Dibujá el área o probá en un rato.`; }
+      } catch (err) { hint.textContent = `El servidor no respondió (${err.message}). Dibujá el área o probá en un rato.`; }
     });
     const runSearch = async () => {
       const q = search.value.trim();
@@ -468,18 +499,18 @@ export function renderWizard(app, preset = {}) {
     function paintInfo() {
       clear(info);
       if (!w.area) {
-        info.append(el('p', { class: 'note' }, 'Todavía no hay área. Buscá un lugar, elegí un partido o dibujala sobre el mapa.'), el('p', { class: 'note' }, 'También podés seguir sin área y ubicarla después en el mapa.'));
+        info.append(el('p', { class: 'note' }, 'Todavía no hay área. Buscá un lugar de cualquier país de América Latina, elegí un municipio o dibujala sobre el mapa.'), el('p', { class: 'note' }, 'También podés seguir sin área y ubicarla después en el mapa.'));
         return;
       }
       const pl = readPlace(w.area.center[0], w.area.center[1]);
-      const nm = el('input', { type: 'text', value: w.area.name || '', placeholder: 'Ej.: Pago Gilense' });
+      const nm = el('input', { type: 'text', value: w.area.name || '', placeholder: 'Ej.: Valle de Lerma, cuenca del río Luján, Oaxaca' });
       nm.addEventListener('input', () => { if (w.area) w.area.name = nm.value; });
       const [W, S, E, N] = w.area.bbox;
       const km = (E - W) * 111.32 * Math.cos((((S + N) / 2) * Math.PI) / 180);
       const facts = el('dl', { class: 'area-facts' },
-        el('div', {}, el('dt', {}, 'Región'), el('dd', {}, pl.region ? pl.region.name : pl.macro || '—')),
+        el('div', {}, el('dt', {}, 'Región'), el('dd', {}, pl.region ? pl.region.name : (pl.country && !/argentina/i.test(pl.country) ? pl.country : pl.macro || pl.country || '—'))),
         el('div', {}, el('dt', {}, 'Forma'), el('dd', {}, w.area.geom.type === 'Point' ? 'Punto' : `${fmtNum(km, km < 10 ? 1 : 0)} km de ancho`)),
-        pl.faja ? el('div', {}, el('dt', {}, 'Marco'), el('dd', {}, `POSGAR 2007, faja ${pl.faja}`)) : null);
+        el('div', {}, el('dt', {}, 'Marco'), el('dd', {}, pl.faja && /argentina/i.test(pl.country || 'argentina') ? `POSGAR 2007, faja ${pl.faja}` : `WGS 84, UTM zona ${utmZone(w.area.center[0])}${w.area.center[1] >= 0 ? 'N' : 'S'}`)));
       info.append(...[
         fld('Nombre del área', nm, 'Aparece en el epígrafe y en el mapa de ubicación.'),
         facts,
@@ -508,20 +539,49 @@ export function renderWizard(app, preset = {}) {
     const place = w.area ? readPlace(w.area.center[0], w.area.center[1]) : null;
     const syn = synthesize({ traits, place, relief: null, scaleRF: null });
     if (!w.themeId) w.themeId = syn.themeId || 'paisaje-pampeano';
+    const ctry = w.area ? countryAtLL(w.area.center[0], w.area.center[1]) : null;
+    const inArg = w.area ? (ctry ? ctry.iso === 'ARG' : !!(place && place.faja)) : true;
+    if (w._mode !== inArg) {
+      // al cambiar de país se vuelven a proponer las capas: en la Argentina, las del IGN; en el resto, límites y OpenStreetMap del área
+      w._mode = inArg;
+      if (inArg) { w.layers = new Set(SUGGESTED.base); w.fetch = new Set(); w._layersInit = false; }
+      else {
+        w.layers = new Set(w.start === 'satellite' ? [] : ['dem-analitico']);
+        const [W, S, E, N] = w.area.bbox;
+        w.fetch = new Set(['gb:ADM1', ...((E - W) * (N - S) < 9 ? ['gb:ADM2', 'osm:rios', 'osm:vias', 'osm:localidades'] : [])]);
+        w._layersInit = true;
+      }
+    }
     if (!w._layersInit) {
       (syn.layers || []).filter((id) => getDef(id) && !/^atlas-/.test(id)).forEach((id) => w.layers.add(id));
       if (w.start === 'satellite') w.layers.delete('dem-analitico');
       w._layersInit = true;
     }
-    const autoProj = w.area ? (w.area.center[1] < -60 ? 'estereográfica polar' : `POSGAR 2007 faja ${gkFaja(w.area.center[0])}`) : 'según el área';
-    const projOpts = [['', `Automática (${autoProj})`], ['CONI:BICONT', 'Bicontinental IGN'], ['EPSG:3857', 'Mercator web'], ['EPSG:4326', 'Geográficas'], ['EPSG:3031', 'Estereográfica polar antártica']];
+    const autoProj = !w.area ? 'América Latina, equivalente' : (w.area.center[1] < -60 ? 'estereográfica polar' : inArg ? `POSGAR 2007 faja ${gkFaja(w.area.center[0])}` : `UTM zona ${utmZone(w.area.center[0])}${w.area.center[1] >= 0 ? 'N' : 'S'}`);
+    const projOpts = [['', `Automática (${autoProj})`], ['auto-utm', 'UTM de la zona (WGS 84)'], ['MT:LAEA_LATAM', 'América Latina (equivalente)'], ['CONI:BICONT', 'Argentina bicontinental IGN'], ['EPSG:3857', 'Mercator web'], ['EPSG:4326', 'Geográficas']];
     const layerBox = el('div', { class: 'wiz-layers' });
-    for (const id of [...SUGGESTED.base, ...SUGGESTED.extra, ...[...w.layers].filter((x) => !SUGGESTED.base.includes(x) && !SUGGESTED.extra.includes(x))]) {
-      const d = getDef(id);
-      if (!d) continue;
-      const cb = el('input', { type: 'checkbox', checked: w.layers.has(id) });
-      cb.addEventListener('change', () => { if (cb.checked) w.layers.add(id); else w.layers.delete(id); });
-      layerBox.append(el('label', { class: 'check' }, cb, el('span', {}, d.name)));
+    if (inArg) {
+      for (const id of [...SUGGESTED.base, ...SUGGESTED.extra, ...[...w.layers].filter((x) => !SUGGESTED.base.includes(x) && !SUGGESTED.extra.includes(x))]) {
+        const d = getDef(id);
+        if (!d) continue;
+        const cb = el('input', { type: 'checkbox', checked: w.layers.has(id) });
+        cb.addEventListener('change', () => { if (cb.checked) w.layers.add(id); else w.layers.delete(id); });
+        layerBox.append(el('label', { class: 'check' }, cb, el('span', {}, d.name)));
+      }
+    } else {
+      const iso = ctry ? ctry.iso : '';
+      const opts = [
+        ...(iso ? [['gb:ADM1', `${ctry.nombre}: límites de primer orden (estados, provincias, departamentos)`], ['gb:ADM2', `${ctry.nombre}: límites de segundo orden (municipios, cantones, comunas)`]] : []),
+        ...['rios', 'agua', 'vias', 'vias2', 'ferrocarril', 'localidades', 'protegidas'].map((id) => [`osm:${id}`, `${OSM_THEMES.find((t) => t.id === id).name} (OpenStreetMap, dentro del área)`]),
+      ];
+      for (const [id, label] of opts) {
+        const cb = el('input', { type: 'checkbox', checked: w.fetch.has(id) });
+        cb.addEventListener('change', () => { if (cb.checked) w.fetch.add(id); else w.fetch.delete(id); });
+        layerBox.append(el('label', { class: 'check' }, cb, el('span', {}, label)));
+      }
+      const dem = el('input', { type: 'checkbox', checked: w.layers.has('dem-analitico') });
+      dem.addEventListener('change', () => { if (dem.checked) w.layers.add('dem-analitico'); else w.layers.delete('dem-analitico'); });
+      layerBox.append(el('label', { class: 'check' }, dem, el('span', {}, getDef('dem-analitico').name)));
     }
     const mediaSel = el('select', {});
     for (const g of [...new Set(MEDIA.map((x) => x.group))]) {
@@ -546,11 +606,31 @@ export function renderWizard(app, preset = {}) {
         meta.area = w.area ? { name: w.area.name, geom: w.area.geom, bbox: w.area.bbox, center: w.area.center } : null;
         meta.mediaId = w.mediaId; meta.themeId = w.themeId;
         const state = buildFirstMap(meta, w.area, { start: w.start, mediaId: w.mediaId, themeId: w.themeId, projection: w.projection, layers: [...w.layers], context: w.context, mapName: w.mapName });
+        // capas que se traen de la red para el área (límites y OpenStreetMap): si una falla, el proyecto se crea igual
+        const failed = [];
+        if (!inArg && w.fetch && w.fetch.size && w.area) {
+          const bb = w.area.bbox, px = (bb[2] - bb[0]) * 0.25, py = (bb[3] - bb[1]) * 0.25;
+          const box = [bb[0] - px, bb[1] - py, bb[2] + px, bb[3] + py];
+          const gi = () => { const g = state.layers.findIndex((l) => l.def === 'graticule'); return g >= 0 ? g : state.layers.length; };
+          const ai = () => { const a = state.layers.findIndex((l) => l.params && l.params.sem === 'study-area'); return a >= 0 ? a : gi(); };
+          for (const id of w.fetch) {
+            create.textContent = `Trayendo capas… (${[...w.fetch].indexOf(id) + 1} de ${w.fetch.size})`;
+            try {
+              if (id.startsWith('gb:') && ctry) {
+                const r = await fetchBoundaries(ctry.iso, id.slice(3), id === 'gb:ADM2' ? box : null);
+                if (r.kept) state.layers.splice(ai(), 0, boundariesLayer(ctry.iso, id.slice(3), r.geojson));
+              } else if (id.startsWith('osm:')) {
+                const r = await fetchOsm(id.slice(4), box);
+                if (r.geojson.features.length) state.layers.splice(ai(), 0, osmLayer(r.theme, r.geojson, ''));
+              }
+            } catch (e) { failed.push(`${id.startsWith('gb:') ? 'límites' : OSM_THEMES.find((t) => t.id === id.slice(4)).name.toLowerCase()} (${e.message})`); }
+          }
+        }
         meta.crs = state.projection;
         const p = await createProject(meta, { name: w.mapName, state });
         cleanup();
         location.hash = `#/p/${p.id}`;
-        app.toast(`Proyecto «${meta.name}» creado y guardado en esta computadora.`);
+        app.toast(failed.length ? `Proyecto «${meta.name}» creado. No se pudieron traer: ${failed.join('; ')}. Se pueden sumar después desde Capas.` : `Proyecto «${meta.name}» creado y guardado en esta computadora.`, failed.length ? 'warn' : 'info');
       } catch (err) { console.error(err); app.toast(`No se pudo crear el proyecto: ${err.message}`, 'error'); create.disabled = false; create.textContent = 'Crear el proyecto'; }
     });
     const reading = traits.length
@@ -564,10 +644,10 @@ export function renderWizard(app, preset = {}) {
         fld('Dónde se va a ver', mediaSel, null),
         fld('Estilo', themeSel),
         fld('Proyección', sel(w, 'projection', projOpts)),
-        el('div', { class: 'wf-check' }, el('label', { class: 'check' }, ctx, el('span', {}, 'Incluir un mapa de ubicación en la Argentina')))),
+        el('div', { class: 'wf-check' }, el('label', { class: 'check' }, ctx, el('span', {}, 'Incluir un mapa de ubicación en el país')))),
       mediaNote,
       el('h2', {}, 'Capas de partida'),
-      el('p', { class: 'note' }, w.start === 'satellite' ? 'La imagen satelital queda abajo como base y se puede ocultar. Las capas del IGN son vectoriales: se cargan a escalas de detalle y se pueden restilizar.' : 'Sobre papel, con las capas vectoriales oficiales: se cargan a escalas de detalle y se pueden restilizar.'),
+      el('p', { class: 'note' }, inArg ? (w.start === 'satellite' ? 'La imagen satelital queda abajo como base y se puede ocultar. Las capas del IGN son vectoriales: se cargan a escalas de detalle y se pueden restilizar.' : 'Sobre papel, con las capas vectoriales oficiales: se cargan a escalas de detalle y se pueden restilizar.') : 'Las capas marcadas se descargan ahora para el área y quedan guardadas dentro del mapa, como vectores que se pueden restilizar y exportar. Los geoservicios oficiales del país se suman después desde Capas › Servicios oficiales.'),
       layerBox,
       el('div', { class: 'wiz-nav' },
         el('button', { type: 'button', class: 'btn ghost', onclick: () => { w.step = 2; paint(); } }, 'Volver al lugar'),

@@ -25,7 +25,7 @@ export function renderThesisPanel(app, root) {
     readingView(app),
     el('h2', { class: 'panel-h' }, 'Estilos de tesis'),
     themesGallery(app),
-    el('h2', { class: 'panel-h' }, 'Modelos de ejemplo'),
+    el('h2', { class: 'panel-h' }, 'Hojas de partida'),
     modelsGallery(app),
     el('h2', { class: 'panel-h' }, 'Modelo propio de referencia'),
     modelRefView(app),
@@ -55,7 +55,7 @@ function themeForm(app) {
     field('Lugar (se ubica con la vista del mapa o con el buscador de arriba)', text(th, 'place', { placeholder: 'Partido, localidad o región' })),
     el('div', { class: 'btn-row wrap' },
       button('Interpretar tema y lugar', () => interpretNow(app), { kind: 'primary' }),
-      !th.title ? button('Usar mi tema de ejemplo', () => { Object.assign(th, THESIS_EXAMPLE); app.renderLeft(); }, { kind: 'small ghost' }) : null),
+      !th.title ? button('Probar con un tema de ejemplo', () => { Object.assign(th, THESIS_EXAMPLE); app.renderLeft(); }, { kind: 'small ghost' }) : null),
   );
   return box;
 }
@@ -197,7 +197,7 @@ function modelsGallery(app) {
   const box = el('div', { class: 'templates' });
   let grp = '';
   for (const t of TEMPLATES) {
-    if (t.group !== grp) { grp = t.group; box.append(el('p', { class: 'menu-label' }, 'Tesis: Pago Gilense (San Andrés de Giles)')); }
+    if (t.group !== grp) { grp = t.group; box.append(el('p', { class: 'menu-label' }, 'Hojas en blanco')); }
     box.append(el('div', { class: 'tpl' }, el('div', { class: 'tpl-text' }, el('strong', {}, t.name), t.desc ? el('span', {}, t.desc) : null), button('Nuevo mapa', () => app.loadTemplate(t.id), { kind: 'small' })));
   }
   box.append(el('p', { class: 'hint' }, 'Cada modelo se agrega como un mapa nuevo de este proyecto; el mapa abierto queda como está.'));

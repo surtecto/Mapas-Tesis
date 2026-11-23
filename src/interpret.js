@@ -10,7 +10,7 @@ const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-
 export const TRAITS = [
   { id: 'historico', label: 'Histórico y de archivo', theme: 'tinta-historica',
     re: [/histor/, /siglo (xvi|xvii|xviii|xix)/, /colonial/, /virrein/, /archivo/, /mensura/, /duplicado/, /agrimens/, /\b1[5-8]\d\d\b/, /\b19[0-4]\d\b/, /enfiteusis/, /\bpagos?\b/, /genealog/, /fortin/, /cabildo/, /suertes? de estancia/, /planos? (antiguo|historic)/, /cartografia historica/, /catastro historico/, /registro grafico/, /poblamiento/],
-    layers: ['atlas-mensuras', 'atlas-caminos', 'atlas-estancias1884', 'ign-cartas50'],
+    layers: ['ign-cartas50'],
     symb: 'Trazo fino de tinta, aguas en azul grisáceo, rótulos en serif de grabado; los períodos se colorean con una escala secuencial (más oscuro, más antiguo).',
     questions: [
       '¿El mapa nuevo reproduce la mirada del agrimensor (el campo como parcela medida) o la discute?',
@@ -66,7 +66,7 @@ export const TRAITS = [
     ] },
   { id: 'etno', label: 'Etnohistoria y territorialidades indígenas', theme: 'conjetural',
     re: [/indigena/, /pueblos originarios/, /tolderia/, /cacique/, /mapuche/, /ranquel/, /tehuelche/, /\bindio/, /malon/, /etnohistor/, /cazadores/, /recolector/, /arqueolog/, /rastrillada/, /frontera/, /coliqueo/, /catriel/, /parlamento/],
-    layers: ['atlas-caminos'],
+    layers: [],
     symb: 'Gramática de certeza: documentado (trazo lleno), inferido (guiones), conjetural (puntos y signo de pregunta). Lo indígena no como «vacío» sino como presencia con otra forma de registro.',
     questions: [
       'Las fuentes coloniales nombran «desierto» a territorios habitados: ¿el mapa hereda ese vacío o lo vuelve visible como silencio de la fuente?',
@@ -80,12 +80,12 @@ export const TRAITS = [
     questions: ['¿Los colores de los sitios son los mismos que los de los gráficos estadísticos? (podés extraerlos de una imagen del gráfico en Sitios y colores).'] },
   { id: 'patrimonio', label: 'Patrimonio y memoria', theme: 'patrimonio',
     re: [/patrimon/, /arquitect/, /edificio/, /escuelas? rural/, /capilla/, /iglesia/, /monumento/, /bienes? cultural/, /memoria/, /sitios? historic/, /casco/, /pulperia/, /posta/],
-    layers: ['ign-escuelas', 'ign-religiosos', 'ign-cementerios', 'ign-taperas', 'atlas-estancias1884'],
+    layers: ['ign-escuelas', 'ign-religiosos', 'ign-cementerios', 'ign-taperas'],
     symb: 'Puntos jerarquizados con rótulos propios; la base acompaña sin competir.',
     questions: ['¿Qué hace que un punto sea «patrimonio» en el mapa: la declaratoria oficial o la memoria de quienes habitan el lugar?'] },
   { id: 'redes', label: 'Caminos, circulación y conectividad', theme: 'redes',
     re: [/caminos?\b/, /ferrocarril/, /vias? ferrea/, /\brutas?\b/, /transporte/, /vialidad/, /circulacion/, /tropas/, /carretas/, /postas?\b/, /conectividad/, /red vial/, /itinerario/, /recorrido/],
-    layers: ['ign-ruta-nac', 'ign-ruta-prov', 'ign-caminos', 'ign-ferrocarril', 'ign-estaciones', 'atlas-caminos'],
+    layers: ['ign-ruta-nac', 'ign-ruta-prov', 'ign-caminos', 'ign-ferrocarril', 'ign-estaciones'],
     symb: 'Ferrocarril con durmientes, rutas con borde, caminos finos, recorridos con flechas de sentido.',
     questions: ['¿El trazado actual de un camino es el histórico? Las rectificaciones del siglo XX borraron curvas que eran vados, postas o deslindes.'] },
 ];
@@ -137,8 +137,8 @@ function haversineKm(a, b) {
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
-function countryAt(lon, lat) {
-  const fc = EMBEDDED['data/paises_ne_vista_arg.geojson'];
+export function countryAt(lon, lat) {
+  const fc = EMBEDDED['data/paises_america.geojson'];
   for (const f of fc.features || []) {
     const g = f.geometry;
     if (!g) continue;

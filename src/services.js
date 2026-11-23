@@ -65,6 +65,17 @@ export const FEATURED = [
     wfs: 'https://ideec.estadisticaciudad.gob.ar/geoserver/ows', wms: 'https://ideec.estadisticaciudad.gob.ar/geoserver/ows' },
   { id: 'idecor', short: 'IDECOR', name: 'IDE de Córdoba', level: 'Provincial', jur: 'Córdoba', topics: 'catastro, suelos, relieve, coberturas',
     wfs: 'https://idecor-ws.mapascordoba.gob.ar/geoserver/idecor/wfs', wms: 'https://idecor-ws.mapascordoba.gob.ar/geoserver/idecor/wms' },
+  // catastros provinciales comprobados el 23/11/2026 (responden y se pueden leer desde la aplicación)
+  { id: 'caba-ide', short: 'IDE CABA', name: 'IDE de la Ciudad de Buenos Aires: catastro y datos urbanos', level: 'Provincial', jur: 'Ciudad de Buenos Aires', topics: 'catastro: parcelas, manzanas; equipamiento, espacio público, transporte',
+    wfs: 'https://geoserver.buenosaires.gob.ar/geoserver/catalogo_og_130/wfs', wms: 'https://geoserver.buenosaires.gob.ar/geoserver/catalogo_og_130/wms' },
+  { id: 'lapampa-catastro', short: 'Catastro La Pampa', name: 'Dirección General de Catastro de La Pampa', level: 'Provincial', jur: 'La Pampa', topics: 'catastro: parcelario rural y urbano, circunscripciones, macizos',
+    wfs: 'https://geoidelp.lapampa.gob.ar/geoserver/p_dirg_catastro/wfs', wms: 'https://geoidelp.lapampa.gob.ar/geoserver/p_dirg_catastro/wms' },
+  { id: 'mendoza-atm', short: 'ATM Mendoza', name: 'Administración Tributaria Mendoza: catastro', level: 'Provincial', jur: 'Mendoza', topics: 'catastro: parcelas, manzanas, expedientes de mensura',
+    wfs: 'https://www.atm.mendoza.gov.ar/geoserver/ows', wms: 'https://www.atm.mendoza.gov.ar/geoserver/ows' },
+  { id: 'neuquen-catastro', short: 'Catastro Neuquén', name: 'Dirección Provincial de Catastro e Información Territorial de Neuquén', level: 'Provincial', jur: 'Neuquén', topics: 'catastro: parcelas, redes de apoyo; abrir la carpeta IDE',
+    arcgis: 'https://catastro.neuquen.gov.ar/nqn_ide/rest/services' },
+  { id: 'salta-ide', short: 'IDESA', name: 'IDE de Salta', level: 'Provincial', jur: 'Salta', topics: 'catastro: parcelas; límites, ambiente, infraestructura',
+    wfs: 'https://geoportal.salta.gob.ar/geoserver/wfs', wms: 'https://geoportal.salta.gob.ar/geoserver/wms' },
 ];
 
 // ---------- utilidades ----------

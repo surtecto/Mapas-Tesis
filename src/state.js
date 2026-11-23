@@ -37,7 +37,7 @@ export function newLayerState(defId, over = {}) {
     clip: d.clip || 'none',
     style: d.style ? deepClone(d.style) : null,
     params: d.params ? deepClone(d.params) : {},
-    legend: { show: def.kind === 'vector' && def.type !== 'esri-feature' && !def.labelsOnly && defId !== 'ne-paises' && def.sem !== 'grid-index', label: def.name },
+    legend: { show: def.kind === 'vector' && def.type !== 'esri-feature' && !def.labelsOnly && defId !== 'ne-paises' && defId !== 'ne-america' && def.sem !== 'grid-index', label: def.name },
     insets: {},
     rev: 0,
     _styleVersion: 0,

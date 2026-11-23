@@ -4,6 +4,22 @@ import { field, inlineFields, select, check, range, button, text } from './forms
 import { exportSize, renderRaster, renderSvg, canvasToPng, canvasToJpeg, canvasToTiff, canvasToPdf } from '../exporter.js';
 import { getMedia, exportDpi, checkLegibility } from '../media.js';
 import { defOf } from '../catalog.js';
+import { frameRect } from '../overlay.js';
+import { lonLatTo, resolutionFromMpm, projInfo } from '../projections.js';
+
+// Archivo de georreferencia de la figura exportada (seis líneas): permite abrir la imagen en QGIS en su lugar.
+// Vale para toda la página porque el mapa no está rotado y su escala es constante en el sistema del mapa.
+export function worldFileFor(state, dpi) {
+  if (Math.abs(state.view.rotation || 0) > 1e-6) return null;
+  const f = frameRect(state);
+  const code = state.projection;
+  const u = resolutionFromMpm(code, state.view.center, state.view.mpm, 1); // unidades del mapa por mm de papel
+  const c = lonLatTo(code, state.view.center);
+  const px = (u * 25.4) / dpi;
+  const x0 = c[0] - (f.x + f.w / 2) * u, y0 = c[1] + (f.y + f.h / 2) * u;
+  return { text: [px, 0, 0, -px, x0 + px / 2, y0 - px / 2].map((v) => v.toFixed(8)).join('\n') + '\n', code };
+}
+const WF_EXT = { png: 'pgw', jpeg: 'jgw', tiff: 'tfw' };
 
 const FORMATS = [
   ['png', 'PNG (sin pérdida)'],
@@ -49,6 +65,13 @@ export function openExportDialog(app) {
     clear(qualityRow);
     if (opts.format === 'jpeg' || (opts.format === 'pdf' && !opts.lossless)) qualityRow.append(field('Calidad JPEG', range(opts, 'quality', { min: 0.6, max: 1, step: 0.01, format: (v) => `${Math.round(v * 100)}%` })));
     if (opts.format === 'pdf') qualityRow.append(check(opts, 'lossless', 'PDF sin pérdida (más pesado)', { onChange: updateSummary }));
+    if (WF_EXT[opts.format]) {
+      const can = Math.abs(st.view.rotation || 0) < 1e-6;
+      if (!can) opts.world = false;
+      const wc = check(opts, 'world', `Sumar el archivo de georreferencia (.${WF_EXT[opts.format]}) para abrir la figura en QGIS`, {});
+      if (!can) wc.querySelector('input').disabled = true;
+      qualityRow.append(wc, el('p', { class: 'note' }, can ? `Se descarga un segundo archivo con el mismo nombre. En QGIS, asignale a la imagen el sistema del mapa: ${/^EPSG:/.test(st.projection) ? st.projection : projInfo(st.projection).name}.` : 'No disponible con el mapa rotado.'));
+    }
   };
   const fmtSel = select(opts, 'format', FORMATS, { onChange: updateSummary });
   const dpiList = [['150', '150 ppp (borrador, pantalla)'], ['300', '300 ppp (fotografías, imágenes en color)'], ['600', '600 ppp (figuras combinadas con texto)'], ['1200', '1200 ppp (dibujo lineal)']];
@@ -80,6 +103,10 @@ export function openExportDialog(app) {
       }
       const fname = `${slug(opts.name)}.${ext}`;
       downloadBlob(blob, fname);
+      if (opts.world && WF_EXT[opts.format]) {
+        const wf = worldFileFor(st, dpi);
+        if (wf) setTimeout(() => downloadBlob(new Blob([wf.text], { type: 'text/plain' }), `${slug(opts.name)}.${WF_EXT[opts.format]}`), 400);
+      }
       progress.textContent = `Listo: ${fname} (${(blob.size / 1048576).toFixed(1).replace('.', ',')} MB).${tileErrors ? ` Atención: ${tileErrors} teselas no se pudieron descargar y faltan en la imagen.` : ''}`;
       app.lastExport = { name: fname, size: blob.size, tileErrors };
     } catch (err) {

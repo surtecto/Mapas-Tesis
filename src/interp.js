@@ -83,61 +83,6 @@ export async function removeSource(app, src) {
   if (!st.interp.sources.some((x) => x.key === src.key)) await deleteImage(src.key);
 }
 
-// Ejemplo real: duplicado de mensura 45 (Lescano, 1866), con las cuatro esquinas del rectángulo de la carpeta 45 del Atlas
-export const EXAMPLE_LESCANO = {
-  key: 'ejemplo-mensura-045',
-  url: 'data/ejemplos/mensura-045-lescano-1866.jpg',
-  source: {
-    title: 'Duplicado de mensura N.º 45: campo de los herederos de Francisco Lescano',
-    author: 'Saubidet, Pedro (agrimensor)', year: '1866',
-    archive: 'Archivo Histórico de Geodesia, Provincia de Buenos Aires', ref: 'Duplicado 45 (antes «Sección Areco N.º 206»)',
-    url: 'https://github.com/surtecto/atlas-mensuras-giles',
-    notes: 'Fotografía del plano tomada en el archivo (con perspectiva). El plano está dibujado con el sudoeste hacia arriba: arriba linda con Noriega, a la izquierda con Achával, abajo con los herederos de José Díaz y a la derecha con las sobras de Vivar y Pividal. Las cuatro esquinas del rectángulo interior se apoyan en el polígono de la carpeta 45 del Atlas de Mensuras de Giles; la faja de «sobras» que excede el título queda afuera.',
-  },
-  georef: {
-    method: 'projective',
-    gcps: [
-      { name: 'Esquina sur (Noriega y Achával)', px: 530, py: 177, lon: -59.40242, lat: -34.539559 },
-      { name: 'Esquina oeste (Noriega y Pividal)', px: 1440, py: 211, lon: -59.441947, lat: -34.487218 },
-      { name: 'Esquina norte (Pividal y Díaz)', px: 1449, py: 777, lon: -59.401448, lat: -34.467533 },
-      { name: 'Esquina este (Díaz y Achával)', px: 530, py: 771, lon: -59.362402, lat: -34.519659 },
-    ],
-  },
-  feature: {
-    name: 'Campo de los herederos de F. Lescano (1866)', cat: 'suerte', cert: 'cierta', period: '1866',
-    note: 'Rectángulo de 2933,7 ha (5000 × 7900 varas de título) dividido en seis fajas longitudinales para Gerónima, Hilaria, Francisco, Pascual, Alejandro y Solano.',
-    coords: [[-59.401448, -34.467533], [-59.362402, -34.519659], [-59.40242, -34.539559], [-59.441947, -34.487218], [-59.401448, -34.467533]],
-  },
-};
-
-export async function addExampleSource(app, { withFeature = true } = {}) {
-  const st = app.state;
-  const ex = EXAMPLE_LESCANO;
-  let src = st.interp.sources.find((x) => x.key === ex.key);
-  if (!src) {
-    let img = await getImage(ex.key);
-    if (!img) {
-      const { blob, w, h } = await ingestUrl(ex.url);
-      img = await putImage(ex.key, blob, w, h);
-    }
-    src = newSource({ ...ex.source, key: ex.key, w: img.w, h: img.h });
-    st.interp.sources.push(src);
-  }
-  const gr = georefOf(st, src.id, true);
-  if (!gr.gcps.length) {
-    gr.method = ex.georef.method;
-    gr.gcps = ex.georef.gcps.map((g) => ({ id: uid('P'), on: true, ...g }));
-  }
-  if (withFeature) {
-    const v = activeVersion(st);
-    if (!v.features.features.some((f) => f.properties && f.properties.example === 'lescano')) {
-      v.features.features.push({ type: 'Feature', id: uid('E'), properties: { name: ex.feature.name, cat: ex.feature.cat, cert: ex.feature.cert, period: ex.feature.period, note: ex.feature.note, src: src.id, example: 'lescano' }, geometry: { type: 'Polygon', coordinates: [ex.feature.coords] } });
-    }
-  }
-  ensureGeorefLayer(app, src);
-  ensureInterpLayer(app);
-  return src;
-}
 
 // ---------- versiones ----------
 export function duplicateVersion(app, { withFeatures = true, name } = {}) {

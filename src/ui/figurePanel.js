@@ -11,7 +11,7 @@ import { MEDIA, QUALITIES, getMedia, applyMediaPage, checkLegibility, fitToMedia
 const TEXT_PRESETS = [
   { name: 'Título', t: { text: 'Título del mapa', size: 12, bold: true, align: 'center' } },
   { name: 'Mar u océano', t: { text: 'Mar de Weddell', size: 9, italic: true, uppercase: true, letterSpacing: 0.35, color: '#2f6f9f', halo: '#ffffff', haloWidth: 0.8, anchor: 'geo' } },
-  { name: 'Región', t: { text: 'Pampa ondulada', size: 7.5, uppercase: true, letterSpacing: 0.25, color: '#33414d', halo: '#ffffff', haloWidth: 0.9, anchor: 'geo' } },
+  { name: 'Región', t: { text: 'Nombre de la región', size: 7.5, uppercase: true, letterSpacing: 0.25, color: '#33414d', halo: '#ffffff', haloWidth: 0.9, anchor: 'geo' } },
   { name: 'Rótulo', t: { text: 'Rótulo', size: 7, color: '#1d2b38', halo: '#ffffff', haloWidth: 1, anchor: 'geo' } },
   { name: 'Fig. N', t: { text: 'Fig. 1', size: 14, bold: true, align: 'left' } },
   { name: 'Fuentes', t: { text: 'Fuentes: IGN; SCAR ADD; REMA/IBCSO', size: 5.5, color: '#4a5560', align: 'left' } },
@@ -28,7 +28,7 @@ export function renderFigurePanel(app, root) {
     details(`Zooms y mapas de ubicación (${st.insets.length})`, true, insetsEditor(app)),
     details(`Textos (${st.texts.length})`, true, textsEditor(app)),
     details('Epígrafe y fuentes', false, captionEditor(app)),
-    details('Modelos de ejemplo', false, templatesEditor(app)),
+    details('Hojas de partida', false, templatesEditor(app)),
   );
 }
 
@@ -127,9 +127,10 @@ function viewEditor(app) {
       field('Meridiano hacia arriba', el('span', { class: 'inline-pair' }, num(merObj, 'lon', { min: -180, max: 180, step: 1, unit: '°' }),
         button('Orientar', () => { st.view.rotation = rotationForMeridian(app.mainCtx.projection, merObj.lon, st.view.center[1]); app.commit('view'); app.renderLeft(); }, { kind: 'small' })))),
     el('div', { class: 'btn-row wrap' },
-      button('Argentina bicontinental', () => { app.flyTo([-58, -55], 40000, 0); }, { kind: 'small' }),
-      button('Pago Gilense', () => { app.flyTo([-59.47, -34.435], 330, 0); }, { kind: 'small' }),
-      button('Provincia de Buenos Aires', () => { app.flyTo([-60.5, -37], 4200, 0); }, { kind: 'small' })),
+      button('América Latina', () => { app.flyTo([-72, -12], 62000, 0); }, { kind: 'small' }),
+      button('Sudamérica', () => { app.flyTo([-60, -21], 41000, 0); }, { kind: 'small' }),
+      button('México y Centroamérica', () => { app.flyTo([-92, 18.5], 30000, 0); }, { kind: 'small' }),
+      button('Argentina bicontinental', () => { app.flyTo([-58, -55], 40000, 0); }, { kind: 'small' })),
   );
 }
 

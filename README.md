@@ -2,7 +2,18 @@
 
 Generador web de **mapas para tesis e investigación**. Cada computadora guarda su propia **biblioteca de proyectos** (uno o varios mapas por proyecto); un proyecto nuevo empieza por sus datos fundamentales y por el lugar, ubicado **sobre la imagen satelital o en una hoja en blanco**. Las capas oficiales (IGN, INA, INDEC, INTA, Ambiente, ARBA, Estadística bonaerense y todo el catálogo de IDERA) se cargan **como vectores que se pueden restilizar, filtrar y exportar**; las imágenes satelitales se consultan **por fecha** (Sentinel-2 y Landsat desde 1972) junto con la **cobertura del suelo 2017–2025**, sus superficies y sus cambios. La pestaña Análisis suma clases, densidades, áreas de influencia, patrones de puntos, mediciones y **perfiles topográficos**. Todo se compone en milímetros de papel para el destino de la figura (impresión, proyector, videollamada o web) y convive con los **mapas de interpretación** sobre planos históricos.
 
-La primera vez que se abre la web, la planoteca trae un ejemplo real: **Pago Gilense: localización en la Pampa ondulada** (San Andrés de Giles), de la tesis doctoral en curso del arquitecto Juan Patricio Addesso, doctorando en Geografía (Universidad del Salvador). Solo se agrega si ese navegador no tiene ningún proyecto; los proyectos que ya existen nunca se tocan.
+La aplicación sirve para **toda América Latina, de México a Tierra del Fuego**: el asistente ubica el área en cualquier país, elige la proyección (UTM de la zona; POSGAR 2007 en la Argentina), arma el mapa de ubicación del país y trae límites administrativos y datos de OpenStreetMap del área. No trae ejemplos de ninguna investigación en particular: se parte de hojas en blanco ya encuadradas (América Latina, Sudamérica, México y Centroamérica, Argentina). Los proyectos que ya existen nunca se tocan.
+
+## Novedades de la versión 3.5
+
+- **América Latina:** proyecciones UTM (WGS 84) de todas las zonas, de la 11 Norte a la 25 Sur, y una equivalente para el continente; países de América (Natural Earth 1:50M); mapas base mundiales (OpenStreetMap, CARTO, Esri).
+- **Límites administrativos por país** (geoBoundaries, CC BY 4.0) y **OpenStreetMap por tema** (ríos, lagunas, rutas, caminos, ferrocarriles, localidades, áreas protegidas, usos, patrimonio): se descargan para la vista y quedan dentro del mapa como capas propias.
+- **Geoservicios:** directorio inicial por país (México, Guatemala, Costa Rica, Colombia, Ecuador, Perú, Bolivia, Brasil, Uruguay, Chile) y un campo para **pegar la dirección de cualquier servicio** WFS, WMS o ArcGIS REST. Cada organismo muestra si se comprobó (23/11/2026), si solo se puede ver como imagen o si no respondió.
+- **Datos propios:** además de GeoJSON, KML, GPX, CSV y Shapefile en .zip, ahora **KMZ**, **Shapefile suelto** (.shp con su .dbf y .prj) y **ráster**: GeoTIFF de imágenes satelitales procesadas (color verdadero o falso color con elección de bandas), **clasificaciones** (con las leyendas de MapBiomas, ESA WorldCover, Esri/IO y Dynamic World, o colores automáticos), índices y modelos de elevación (en intervalos con leyenda o en degradado), y PNG/JPG con archivo de georreferencia. También soltando los archivos sobre el mapa.
+- **Exportación:** archivo de georreferencia (.pgw, .jgw, .tfw) junto a la figura, para abrirla en QGIS en su lugar.
+- Sin los ejemplos ni las capas del Pago Gilense en el catálogo (los mapas que ya las usan abren igual).
+- **Catastros:** además de ARBA y Córdoba, Ciudad de Buenos Aires, La Pampa, Mendoza, Neuquén y Salta; en la región, Brasil (SICAR), Colombia (IGAC), Uruguay (IDEuy) y Chile (CIREN). Comprobados el 23/11/2026.
+- **Versión anterior:** sigue disponible en `anterior/` (enlace en el inicio). Las dos usan los mismos proyectos y la misma carpeta; abrir un proyecto no lo modifica, y la anterior no abre los mapas que usan funciones de la 3.5, para no perder nada.
 
 Se puede **instalar como aplicación** (Chrome, Edge o el celular: «Instalar» o «Agregar a la pantalla de inicio»), con su ícono: una hoja de tesis con un fragmento de pampa —suertes, un arroyo y el sitio de estudio—.
 
@@ -48,7 +59,7 @@ Se puede **instalar como aplicación** (Chrome, Edge o el celular: «Instalar» 
 - **Propuesta:** un estilo de tesis aplicable con un clic, proyección sugerida, ajuste del relieve y capas sugeridas.
 - **Preguntas a la figura:** cada lectura viene con preguntas críticas (qué mirada reproduce el mapa, qué deja afuera la fuente, qué certeza tiene cada trazo).
 - **13 estilos de tesis:** tinta y papel (histórico), paisaje pampeano, hídrico, físico, urbano-normativo, rural, temático, etnohistórico y conjetural, ecológico, patrimonio, redes, blanco y negro para imprimir, y proyección en sala oscura. Cada estilo restiliza todas las capas según lo que representan (aguas, límites, caminos, ferrocarril, parcelas históricas…).
-- **Modelos de ejemplo:** Pago Gilense, San Andrés de Giles (localización, mensuras y caminos 1825–1925, interpretación de una mensura de 1866, versión para proyector).
+- **Hojas de partida:** América Latina, Sudamérica, México–Centroamérica–Caribe y Argentina, en proyecciones equivalentes.
 - **Modelo propio:** una figura de referencia (de un artículo, otra tesis o un mapa antiguo) se superpone como calco a la hoja y se pueden tomar sus colores.
 
 ### Interpretación: planos históricos y versiones
@@ -61,7 +72,6 @@ Se puede **instalar como aplicación** (Chrome, Edge o el celular: «Instalar» 
 ### Capas
 - **IGN, Argentina continental** (se piden solo para la vista, a escalas de detalle): partidos, localidades, plantas urbanas, ríos y arroyos, cañadas, canales, lagunas, bajos anegables, bañados, curvas de nivel, puntos acotados, rutas, caminos rurales, huellas, ferrocarril y estaciones, escuelas, cementerios, edificios religiosos, taperas, ruinas, establecimientos agropecuarios e **índices de cartas topográficas 1:50.000 y 1:100.000** (con año de levantamiento y marco).
 - **ARBA:** parcelas, manzanas, quintas, chacras, secciones, circunscripciones y partidos.
-- **Atlas de Mensuras de Giles:** mensuras del Archivo Histórico de Geodesia (1825–1925) coloreadas por período, registro gráfico de c. 1874, planta urbana de 1884, caminos, ferrocarril, tranvía y telégrafo, estancias y puestos de 1884 y el poblamiento dibujado en las mensuras.
 - Bases y relieve: Argenmap, IGN costas, islas y espacios marítimos, GEBCO, DEM analítico (con rampas «llanura», «sepia» y «bajos húmedos»), imágenes satelitales y referencias.
 - Simbología: tipos de línea, **decoraciones** (borde, doble línea, ferrocarril, durmientes, peine, dientes de frontera, flechas de recorrido, postes de telégrafo), **tramas** (bañado, ondas, rayas de agua, pastizal, surcos, punteado de médanos, ladrillo, monte) y clasificación por **rangos** (períodos, cantidades; cortes naturales, cuantiles, intervalos iguales o desvío estándar) además de valores únicos. La paleta elegida es la que se usa al generar, y la app avisa cuando el campo parece un código identificador en vez de una medida.
 - **Herramienta de selección** (botón «Seleccionar» de la barra superior): se elige **sobre qué capa** se trabaja y **cómo** se eligen sus objetos: con un clic, un rectángulo, un lazo a mano alzada (todos los que tocan lo dibujado, o solo los que quedan enteros adentro) o **por atributo** (condiciones sobre los campos de la capa: igual, distinto, es uno de, contiene, empieza con, mayor, menor, vacío; combinadas con «todas» o «alguna», con el resumen del campo y la cantidad que cumple antes de elegir). Cada elección puede ser nueva, sumarse, quitarse o quedarse solo con lo ya elegido (Mayús suma, Alt quita). También: todos, invertir, ninguno, acercar a la selección y copiarla a una capa nueva. Los objetos elegidos se estilizan en el mismo panel.
@@ -89,13 +99,11 @@ POSGAR 2007 fajas 1 a 7 (marco oficial argentino), Campo Inchauspe fajas 4 a 6 (
 | Landsat (USGS, NASA) | Esri Landsat Multispectral (`landsat2.arcgis.com`) | fecha y representación en el epígrafe |
 | Cobertura del suelo 10 m | Impact Observatory, Microsoft y Esri | Karra et al. (2021) |
 | Sentinel-2 cloudless | EOX IT Services | por año, con datos Copernicus |
-| Atlas de Mensuras de Giles | Copia local de los datos publicados (`data/atlas_*.geojson`) | Addesso, J. P. (2026) |
 | Georef (Secretaría de Innovación) | API `apis.datos.gob.ar/georef` | Búsqueda de lugares |
 | OpenStreetMap / Nominatim | Búsqueda de lugares | © colaboradores de OpenStreetMap |
 | Terrain Tiles (Mapzen / AWS) | Teselas Terrarium | SRTM, GMTED2010, ETOPO1 |
 | Esri, GEBCO, NASA GIBS, EOX, Natural Earth | servicios públicos de cada proveedor | cada capa conserva su licencia |
 
-El plano de ejemplo (`data/ejemplos/mensura-045-lescano-1866.jpg`) es la fotografía del duplicado de mensura 45 (Pedro Saubidet, 1866, Archivo Histórico de Geodesia) publicada en el Atlas de Mensuras de Giles. Sus cuatro puntos de control son las esquinas del rectángulo interior según el polígono de la carpeta 45 del Atlas; el plano está orientado con el sudoeste hacia arriba.
 
 ## Desarrollo
 ```bash

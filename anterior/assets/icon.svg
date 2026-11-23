@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs><clipPath id="nl"><rect x="148" y="104" width="212" height="308"/></clipPath></defs>
+  <rect width="512" height="512" rx="112" fill="#14263a"/>
+  <g>
+  <path d="M136 90H346L408 152V458H136Z" fill="#06111b" opacity=".45"/>
+  <path d="M120 72H330L392 134V440H120Z" fill="#f3efe4"/>
+  <g clip-path="url(#nl)">
+    <rect x="148" y="104" width="212" height="308" fill="#ece5d3"/>
+    <path d="M-0.3 594.2L561.8 -30.0L588.5 -5.9L26.5 618.3Z" fill="#d9a441" opacity=".6"/><path d="M-80.5 521.9L481.5 -102.3L508.3 -78.2L-53.8 546.0Z" fill="#a9b98a" opacity=".55"/><path d="M80.0 666.5L642.0 42.2L668.8 66.3L106.7 690.6Z" fill="#c98f6a" opacity=".35"/>
+    <g stroke="#bba886" stroke-width="4.5" fill="none"><path d="M-214.3 401.5L347.8 -222.7"/><path d="M-187.6 425.6L374.5 -198.7"/><path d="M-160.8 449.7L401.3 -174.6"/><path d="M-134.0 473.8L428.0 -150.5"/><path d="M-107.3 497.9L454.8 -126.4"/><path d="M-80.5 521.9L481.5 -102.3"/><path d="M-53.8 546.0L508.3 -78.2"/><path d="M-27.0 570.1L535.0 -54.1"/><path d="M-0.3 594.2L561.8 -30.0"/><path d="M26.5 618.3L588.5 -5.9"/><path d="M53.2 642.4L615.3 18.1"/><path d="M80.0 666.5L642.0 42.2"/><path d="M106.7 690.6L668.8 66.3"/><path d="M133.5 714.7L695.6 90.4"/><path d="M160.2 738.7L722.3 114.5"/></g>
+    <g stroke="#bba886" stroke-width="3" fill="none" opacity=".8"><path d="M-232.4 191.4L391.8 753.5"/><path d="M-170.8 123.1L453.4 685.1"/><path d="M-109.3 54.7L515.0 616.8"/><path d="M-47.7 -13.7L576.5 548.4"/><path d="M13.8 -82.0L638.1 480.0"/><path d="M75.4 -150.4L699.6 411.7"/><path d="M137.0 -218.8L761.2 343.3"/></g>
+    <path d="M140 214 C186 226 204 270 246 282 S320 300 334 346 S352 404 372 420" stroke="#2f6f9f" stroke-width="12" fill="none" stroke-linecap="round"/>
+  </g>
+  <rect x="148" y="104" width="212" height="308" fill="none" stroke="#14263a" stroke-width="5"/>
+  <path d="M330 72V134H392Z" fill="#d3c7ae"/>
+  <rect x="226" y="232" width="52" height="52" fill="#e8501c" stroke="#f3efe4" stroke-width="9" transform="rotate(-6 252 258)"/>
+  </g>
+</svg>
