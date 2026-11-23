@@ -1,4 +1,5 @@
 // Página de inicio: la planoteca de esta computadora (proyectos con sus mapas) y el asistente para empezar uno nuevo.
+import { openHelp } from './help.js';
 import OlMap from 'ol/Map.js';
 import View from 'ol/View.js';
 import TileLayer from 'ol/layer/Tile.js';
@@ -149,7 +150,7 @@ export async function renderHome(app, { sync = true } = {}) {
         } }, 'Pedir al navegador que no los borre')),
   );
   root.append(
-    topBar('Cartografía para investigar, interpretar y mostrar', [el('button', { type: 'button', class: 'btn ghost', onclick: () => importInput.click() }, 'Importar proyecto'), importInput]),
+    topBar('Cartografía para investigar, interpretar y mostrar', [el('button', { type: 'button', class: 'btn ghost', onclick: () => openHelp('guia') }, 'Ayuda'), el('button', { type: 'button', class: 'btn ghost', onclick: () => importInput.click() }, 'Importar proyecto'), importInput]),
     whatsNew(app),
     el('main', { class: `home-main${projects.length ? ' has-projects' : ''}` }, start, libr));
 }

@@ -934,3 +934,46 @@ dialog.svc-dialog { width: min(1280px, calc(100vw - 24px)); height: min(860px, c
 .wn-versions { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); }
 .wn-versions a { color: #c2441f; font-weight: 600; }
 @media (max-width: 700px) { .whatsnew { padding: 0 14px; } }
+
+/* ---------- ayuda ---------- */
+dialog.help-dialog { width: min(980px, calc(100vw - 24px)); height: min(820px, calc(100vh - 24px)); max-width: none; max-height: none; padding: 0; }
+.help { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.help-head { display: flex; align-items: center; gap: 10px; padding: 14px 20px 10px; border-bottom: 1px solid var(--rule); }
+.help-head > div { margin-right: auto; }
+.help-head h2 { margin: 0; font-variation-settings: 'wdth' 115; font-size: 20px; }
+.help-head p { margin: 0; font-size: 12.5px; color: var(--muted); }
+.help-head a.btn { text-decoration: none; }
+.help-ask { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; padding: 12px 20px; background: var(--panel-2); border-bottom: 1px solid var(--rule); }
+.help-ask small { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+.help-q { width: 100%; font-size: 15px; padding: 9px 12px; }
+.help-tabs { padding: 0 12px; }
+.help-tabs .tab { font-size: 14px; padding: 10px 14px; }
+.help-back { padding: 8px 20px 0; }
+.help-pane { flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 26px; font-size: 14.5px; line-height: 1.5; }
+.help-pane p { margin: 0 0 10px; max-width: 74ch; }
+.help-pane ul, .help-pane ol { margin: 0 0 12px; padding-left: 22px; max-width: 74ch; }
+.help-pane li { margin-bottom: 5px; }
+.help-lead { font-size: 15.5px; color: var(--ink); }
+.help-steps { counter-reset: paso; list-style: none; padding: 0 !important; }
+.help-steps li { counter-increment: paso; display: grid; grid-template-columns: 34px 1fr; column-gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.help-steps li::before { content: counter(paso); grid-row: 1 / 3; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; }
+.help-steps strong { font-size: 15.5px; } .help-steps span { color: var(--ink-2, #3c4f61); }
+.help-note { margin-top: 14px !important; padding: 10px 12px; background: var(--panel-2); border-left: 3px solid var(--accent); }
+.help-faq { border-bottom: 1px solid var(--rule); padding: 9px 0; max-width: 80ch; }
+.help-faq summary { cursor: pointer; font-weight: 650; }
+.help-faq p { margin: 8px 0 2px 16px; }
+.help-manual { display: grid; grid-template-columns: 230px 1fr; gap: 0; padding: 0; overflow: hidden; }
+.help-toc { overflow: auto; padding: 12px 8px; border-right: 1px solid var(--rule); background: var(--panel-2); display: flex; flex-direction: column; gap: 2px; }
+.help-toc button { text-align: left; background: none; border: 0; padding: 7px 10px; border-radius: 5px; font: inherit; font-size: 13.5px; cursor: pointer; color: inherit; }
+.help-toc button:hover { background: rgba(20, 38, 58, .07); } .help-toc button.on { background: var(--ink); color: #fff; }
+.help-chapter { overflow: auto; padding: 16px 24px 30px; }
+.help-chapter h3 { margin: 0 0 6px; font-variation-settings: 'wdth' 112; font-size: 21px; }
+.help-chapter h4, .help-hit h4 { margin: 18px 0 6px; font-size: 16px; }
+.help-chapter section.focus { background: #fff6e8; margin: 0 -10px; padding: 1px 10px 4px; border-radius: 6px; }
+.help-fig { font-size: 12.5px; color: var(--muted); }
+.help-found { color: var(--muted); }
+.help-hit { border: 1px solid var(--rule); border-radius: 8px; padding: 10px 14px 12px; margin-bottom: 10px; max-width: 82ch; }
+.help-hit.first { border-color: var(--accent); border-width: 2px; }
+.help-hit h4 { margin-top: 2px; }
+.help-where { font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+@media (max-width: 720px) { .help-manual { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } .help-toc { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--rule); } .help-toc button { white-space: nowrap; } .help-head a.btn { display: none; } }

@@ -1,4 +1,5 @@
 // Mapas-Tesis: generador de mapas para tesis e investigación (deriva de Coni-Mapas)
+import { openHelp } from './ui/help.js';
 import Draw from 'ol/interaction/Draw.js';
 import Modify from 'ol/interaction/Modify.js';
 import VectorSource from 'ol/source/Vector.js';
@@ -1156,6 +1157,7 @@ class App {
     document.getElementById('btn-undo').addEventListener('click', () => this.undo());
     document.getElementById('btn-redo').addEventListener('click', () => this.redo());
     document.getElementById('btn-export').addEventListener('click', () => openExportDialog(this));
+    document.getElementById('btn-help').addEventListener('click', () => openHelp());
     document.querySelectorAll('.tab').forEach((b) => b.addEventListener('click', () => this.showTab(b.dataset.tab)));
     document.querySelectorAll('[data-zoom]').forEach((b) => b.addEventListener('click', () => {
       const z = b.dataset.zoom;

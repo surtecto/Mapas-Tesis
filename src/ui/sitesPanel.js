@@ -185,7 +185,7 @@ function categoriesView(app) {
       st.categories.push({ id: uid('C'), name: lab || `Categoría ${st.categories.length + 1}`, color: col });
       app.commit('sites'); app.renderLeft();
     }, { kind: 'small' })),
-    diagnosticsView(st.categories.map((c) => c.color)),
+    diagnosticsView(st.categories.map((c) => c.color)) || '',
   );
   return wrap;
 }
