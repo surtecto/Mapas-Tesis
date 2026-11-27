@@ -168,7 +168,11 @@ class App {
   }
   async folderButton() {
     const f = folderStatus();
-    if (!f.ready) { const ok = await reconnectFolder(); if (!ok) { this.toast('Sin permiso, la carpeta no se usa: los cambios quedan en esta computadora.', 'warn'); return; } }
+    if (!f.ready) {
+      const ok = await reconnectFolder();
+      if (!ok && folderStatus().stuck) { this.toast(`El navegador no responde sobre la carpeta «${f.name}». Volvé a Proyectos y tocá «Conectar» para elegirla de nuevo; los cambios quedan en esta computadora.`, 'warn'); return; }
+      if (!ok) { this.toast('Sin permiso, la carpeta no se usa: los cambios quedan en esta computadora.', 'warn'); return; }
+    }
     await this.folderCheck(true);
   }
   // al volver a la ventana: lo que cambió en otra computadora entra; si es el proyecto abierto, se pregunta

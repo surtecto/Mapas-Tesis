@@ -47,7 +47,7 @@ const kvDel = (k) => kvOp('readwrite', (s) => s.delete(k)).catch(() => undefined
 // ---------- estado ----------
 const st = {
   supported: typeof window !== 'undefined' && 'showDirectoryPicker' in window && window.isSecureContext !== false,
-  handle: null, perm: 'none', folderId: null, lastSync: null, error: null, busy: false, foreign: [], pending: false,
+  handle: null, perm: 'none', folderId: null, lastSync: null, error: null, busy: false, foreign: [], pending: false, stuck: false,
 };
 let index = { files: {} };
 let imgDir = null;
@@ -61,7 +61,7 @@ function emit() { const s = folderStatus(); listeners.forEach((f) => { try { f(s
 export function folderStatus() {
   return {
     supported: st.supported, linked: !!st.handle, name: st.handle ? st.handle.name : '', perm: st.perm, ready: !!st.handle && st.perm === 'granted',
-    lastSync: st.lastSync, error: st.error, busy: st.busy, foreign: st.foreign.slice(), pending: st.pending, device: deviceName(), folderId: st.folderId,
+    lastSync: st.lastSync, error: st.error, busy: st.busy, foreign: st.foreign.slice(), pending: st.pending, device: deviceName(), folderId: st.folderId, stuck: st.stuck,
   };
 }
 
@@ -99,28 +99,56 @@ const PERM_TIMEOUT = 2000;
 function queryPerm(handle) {
   let late = false;
   const q = Promise.resolve().then(() => handle.queryPermission({ mode: 'readwrite' })).catch(() => 'prompt');
-  q.then((perm) => { if (late && st.handle === handle && st.perm !== perm) { st.perm = perm; emit(); } });
-  return Promise.race([q, new Promise((res) => setTimeout(() => { late = true; res('prompt'); }, PERM_TIMEOUT))]);
+  q.then((perm) => {
+    if (st.handle !== handle) return;
+    const was = st.stuck; st.stuck = false;
+    if (late && (was || st.perm !== perm)) { st.perm = perm; emit(); }
+  });
+  return Promise.race([q, new Promise((res) => setTimeout(() => { late = true; if (st.handle === handle) st.stuck = true; res('prompt'); }, PERM_TIMEOUT))]);
 }
 
 // tiene que llamarse desde un clic (el navegador pide el gesto)
-export async function chooseFolder() {
+// Con { relink: true } (la carpeta vinculada dejó de responder): si la carpeta elegida es la misma de antes
+// —tiene alguno de los archivos ya conocidos— se conserva su identidad y el índice, y no se pregunta nada más.
+export async function chooseFolder({ relink = false } = {}) {
   const h = await window.showDirectoryPicker({ id: 'mapas-tesis-proyectos', mode: 'readwrite', startIn: 'documents' });
   const perm = await h.requestPermission({ mode: 'readwrite' });
   if (perm !== 'granted') throw new Error('Sin permiso para escribir en esa carpeta.');
-  st.handle = h; st.perm = 'granted'; st.error = null;
+  if (relink && st.folderId && await sameFolder(h)) {
+    st.handle = h; st.perm = 'granted'; st.error = null; st.stuck = false;
+    imgDir = null; knownImages = null;
+    await kvSet('handle', h);
+    emit();
+    return { handle: h, same: true };
+  }
+  st.handle = h; st.perm = 'granted'; st.error = null; st.stuck = false;
   st.folderId = uid('C');
   imgDir = null; knownImages = null;
   index = { files: {} };
   await kvSet('handle', h); await kvSet('folderId', st.folderId); await kvSet('index', index);
   emit();
-  return h;
+  return { handle: h, same: false };
+}
+async function sameFolder(h) {
+  const names = new Set(Object.keys(index.files || {}));
+  const ids = new Set(Object.values(index.files || {}).map((f) => f && f.id).filter(Boolean));
+  if (!names.size) return false;
+  try {
+    for await (const [name, e] of h.entries()) {
+      if (e.kind !== 'file') continue;
+      const m = name.match(FILE_RE);
+      if (names.has(name) || (m && ids.has(m[1]))) return true;
+    }
+  } catch (e) { /* no se pudo leer: se trata como carpeta nueva */ }
+  return false;
 }
 
 // también desde un clic: el navegador vuelve a preguntar tras cerrarlo (o recuerda si se eligió «permitir en cada visita»)
 export async function reconnectFolder() {
   if (!st.handle) return false;
-  try { st.perm = await st.handle.requestPermission({ mode: 'readwrite' }); } catch (e) { st.perm = 'prompt'; }
+  // si el navegador no contesta sobre la carpeta, pedir permiso tampoco contesta: se avisa (folderStatus().stuck)
+  if (st.stuck) { st.perm = await queryPerm(st.handle); if (st.stuck) { emit(); return false; } }
+  if (st.perm !== 'granted') { try { st.perm = await st.handle.requestPermission({ mode: 'readwrite' }); } catch (e) { st.perm = 'prompt'; } }
   if (st.perm === 'granted') st.error = null;
   emit();
   return st.perm === 'granted';
