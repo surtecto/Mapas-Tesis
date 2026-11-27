@@ -86,11 +86,21 @@ export async function initFolder() {
     index = (await kvGet('index')) || { files: {} };
     st.lastSync = (await kvGet('lastSync')) || null;
   } catch (e) { st.handle = null; }
-  if (st.handle) {
-    try { st.perm = await st.handle.queryPermission({ mode: 'readwrite' }); } catch (e) { st.perm = 'prompt'; }
-  }
+  if (st.handle) st.perm = await queryPerm(st.handle);
   emit();
   return folderStatus();
+}
+
+// El navegador a veces no contesta nunca la consulta de permiso (carpeta en una unidad
+// de nube o de red que no está disponible, disco desconectado). Sin un límite, el arranque
+// quedaba esperando y la pantalla de inicio no se dibujaba. Pasado el plazo se sigue como
+// «falta dar permiso»; si la respuesta llega después, se toma igual.
+const PERM_TIMEOUT = 2000;
+function queryPerm(handle) {
+  let late = false;
+  const q = Promise.resolve().then(() => handle.queryPermission({ mode: 'readwrite' })).catch(() => 'prompt');
+  q.then((perm) => { if (late && st.handle === handle && st.perm !== perm) { st.perm = perm; emit(); } });
+  return Promise.race([q, new Promise((res) => setTimeout(() => { late = true; res('prompt'); }, PERM_TIMEOUT))]);
 }
 
 // tiene que llamarse desde un clic (el navegador pide el gesto)
@@ -124,7 +134,7 @@ export async function unlinkFolder() {
 
 async function ensurePerm() {
   if (!st.handle) return false;
-  if (st.perm !== 'granted') { try { st.perm = await st.handle.queryPermission({ mode: 'readwrite' }); } catch (e) { st.perm = 'prompt'; } }
+  if (st.perm !== 'granted') st.perm = await queryPerm(st.handle);
   return st.perm === 'granted';
 }
 
