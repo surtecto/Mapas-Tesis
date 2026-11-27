@@ -186,8 +186,17 @@ function folderStrip(app, projects) {
     wrap.append(el('p', {}, el('strong', {}, 'Carpeta de proyectos: '), 'este navegador no deja elegir una carpeta. En Chrome o Edge, los proyectos se pueden guardar en una carpeta (por ejemplo de OneDrive) y verse en otras computadoras; acá, exportalos e importalos.'));
     return wrap;
   }
-  const pick = async () => {
-    try { await chooseFolder(); } catch (e) { if (e && e.name !== 'AbortError') app.toast(`No se pudo usar esa carpeta: ${e.message}`, 'error'); return; }
+  const pick = async (opts) => {
+    let chosen;
+    try { chosen = await chooseFolder(opts && opts.relink ? { relink: true } : {}); } catch (e) { if (e && e.name !== 'AbortError') app.toast(`No se pudo usar esa carpeta: ${e.message}`, 'error'); return; }
+    if (chosen && chosen.same) { // la misma carpeta, vuelta a vincular: sigue todo como estaba
+      app._lastHomeSync = Date.now();
+      const r = await syncAll();
+      if (app.reportSync) app.reportSync(r);
+      app.toast(`Carpeta «${folderStatus().name}» conectada otra vez.`);
+      renderHome(app, { sync: false });
+      return;
+    }
     const nm = await promptDialog({ title: 'Nombre de esta computadora', label: 'Con este nombre se reconoce quién guardó cada versión', value: deviceName(), ok: 'Listo' });
     if (nm) setDeviceName(nm);
     const mine = projects.filter((p) => !(p.sync && p.sync.localOnly));
@@ -210,16 +219,29 @@ function folderStrip(app, projects) {
       el('div', { class: 'fs-text' },
         el('strong', {}, 'Guardar los proyectos en una carpeta'),
         el('span', {}, 'Elegí una carpeta de esta computadora. Si está dentro de OneDrive, Google Drive o Dropbox para escritorio, se sincroniza sola: en otra computadora elegís la misma carpeta y aparecen los mismos proyectos.')),
-      el('button', { type: 'button', class: 'btn primary', onclick: pick }, 'Elegir carpeta…'));
+      el('button', { type: 'button', class: 'btn primary', onclick: () => pick() }, 'Elegir carpeta…'));
     return wrap;
   }
   if (!f.ready) {
     wrap.append(
       el('div', { class: 'fs-text' },
         el('strong', {}, `Carpeta «${f.name}»`),
-        el('span', {}, 'El navegador pide permiso otra vez para usarla. Elegí «Permitir en cada visita» para que no vuelva a preguntar.')),
+        el('span', {}, f.stuck
+          ? 'El navegador no responde sobre esta carpeta (puede estar en una unidad que ahora no está disponible). Tocá «Conectar» para elegirla de nuevo. Mientras tanto, todo se guarda en esta computadora.'
+          : 'El navegador pide permiso otra vez para usarla. Elegí «Permitir en cada visita» para que no vuelva a preguntar.')),
       el('button', { type: 'button', class: 'btn primary', onclick: async () => {
         const ok = await reconnectFolder();
+        if (!ok && folderStatus().stuck) {
+          const again = await confirmDialog({
+            title: 'La carpeta no responde',
+            text: `El navegador no contesta sobre la carpeta «${f.name}». Para volver a usarla hay que elegirla de nuevo.`,
+            note: 'Si elegís la misma carpeta, los proyectos siguen sincronizados como antes. Los proyectos de esta computadora no se tocan.',
+            ok: 'Elegir la carpeta…',
+          });
+          if (again) await pick({ relink: true });
+          else renderHome(app, { sync: false });
+          return;
+        }
         if (!ok) { app.toast('Sin permiso: los proyectos quedan solo en esta computadora.', 'warn'); return; }
         app._lastHomeSync = Date.now();
         const res = await syncAll();
@@ -239,7 +261,7 @@ function folderStrip(app, projects) {
       f.error ? el('span', { class: 'fs-error' }, f.error) : null),
     el('div', { class: 'fs-actions' },
       el('button', { type: 'button', class: 'btn small', onclick: async () => { app._lastHomeSync = Date.now(); const res = await syncAll(); if (app.reportSync) app.reportSync(res); renderHome(app, { sync: false }); } }, 'Sincronizar ahora'),
-      el('button', { type: 'button', class: 'btn small ghost', onclick: pick }, 'Cambiar carpeta'),
+      el('button', { type: 'button', class: 'btn small ghost', onclick: () => pick() }, 'Cambiar carpeta'),
       el('button', { type: 'button', class: 'btn small ghost', onclick: async () => {
         const ok = await confirmDialog({ title: 'Dejar de usar la carpeta', text: `Los proyectos siguen en esta computadora y los archivos siguen en «${f.name}»; solo se deja de sincronizar.`, ok: 'Dejar de usarla' });
         if (!ok) return;
